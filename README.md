@@ -42,7 +42,7 @@ osm init
 osm status
 ```
 
-`osm init` asks for vault paths, database, Ollama URL, model, and other settings. You can add more vaults by running it again. It saves installed settings in `~/.config/obsidian-semantic-mcp/native_runtime.json`. To update OSM after a new tap release, run `brew update && brew upgrade joynik/tap/osm`.
+`osm init` asks for vault paths, database, Ollama URL, model, and other settings. You can add more vaults by running it again. It saves installed settings in `~/.config/osm/runtime.json`. Existing settings are copied there automatically on first use. To update OSM after a new tap release, run `brew update && brew upgrade joynik/tap/osm`.
 
 For development from this checkout, install [uv](https://docs.astral.sh/uv/), run `uv sync --python 3.14`, copy `.env.example` to `.env`, fill in your paths and URLs, then use `uv run osm ...`. Saved `osm init` settings take precedence over the checkout `.env`.
 

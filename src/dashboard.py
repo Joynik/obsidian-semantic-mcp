@@ -90,7 +90,7 @@ def get_dashboard_token() -> str:
     Deliberately NOT resolved at import time. resolve_dashboard_token()
     generates and persists a token file on first call, so an import-time
     call would make merely importing this module write a secret to
-    ~/.config/obsidian-semantic-mcp/ — which anything that imports for
+    ~/.config/osm/ — which anything that imports for
     reasons of its own (test collection, a linter, an IDE indexer, a doc
     generator) would then trigger as a side effect. Resolve when a request
     actually needs the token instead.

@@ -275,9 +275,9 @@ def prompt_vault():
         return finish([str(p)])
 
     # Prefer the installed configuration when the wizard is run again.
-    from src.launcher import _read_native_runtime
+    from src.launcher import load_native_runtime
 
-    saved = _read_native_runtime(OSM_CONFIG_DIR / "native_runtime.json") or {}
+    saved = load_native_runtime(OSM_CONFIG_DIR) or {}
     existing_multi = os.environ.get("OBSIDIAN_VAULTS", "")
     existing = os.environ.get("OBSIDIAN_VAULT", "")
     if not existing_multi and not existing:
@@ -457,10 +457,8 @@ def _verify_ollama_model(ollama_url: str, model: str) -> bool:
 # ── .env writer (runtime only — gitignored) ───────────────────────────────────
 
 
-# Path shared with src/config.py:resolve_dashboard_token() — keep in sync.
-# Inlined here because osm_cli.py is force-shipped in the wheel and can't
-# easily import from the src/ package on a fresh install.
-_OSM_CONFIG_DIR = Path.home() / ".config" / "obsidian-semantic-mcp"
+# Use the same config directory as the installed launcher.
+_OSM_CONFIG_DIR = OSM_CONFIG_DIR
 _DASHBOARD_TOKEN_FILE = _OSM_CONFIG_DIR / "dashboard_token"
 
 
@@ -469,15 +467,13 @@ def _generate_dashboard_token() -> str:
     mutating endpoints (/api/reindex, /api/reindex/full, /api/prune,
     /api/ollama/start).
 
-    Reuses ~/.config/obsidian-semantic-mcp/dashboard_token if present
+    Reuses ~/.config/osm/dashboard_token if present
     so the token survives `osm init` re-runs and `osm update` /
     `osm rebuild` (no auth flap). On a fresh install, generates a new
     token_urlsafe(32) and persists it mode 0600 — never written under
     the repo checkout.
 
-    Mirrors src/config.py:resolve_dashboard_token() precedence but is
-    duplicated here because osm_cli.py is the wheel's entrypoint and
-    can't import from src/ at first-run time.
+    Mirrors src/config.py:resolve_dashboard_token() precedence.
     """
     if env_token := os.environ.get("DASHBOARD_TOKEN"):
         return env_token
@@ -1061,7 +1057,7 @@ def _write_native_runtime(
 
     if DRY_RUN:
         _dry(
-            f"write {OSM_CONFIG_DIR / 'native_runtime.json'}",
+            f"write {OSM_CONFIG_DIR / 'runtime.json'}",
             "owner-only native runtime configuration",
         )
         return
@@ -1084,9 +1080,9 @@ def _write_native_runtime(
 
 def mode_native_macos():
     """Configure a native Qdrant or PostgreSQL index and local Ollama."""
-    from src.launcher import _read_native_runtime
+    from src.launcher import load_native_runtime
 
-    previous = _read_native_runtime(OSM_CONFIG_DIR / "native_runtime.json") or _read_env()
+    previous = load_native_runtime(OSM_CONFIG_DIR) or _read_env()
     vaults = prompt_vault()
     index_archive = confirm(
         "Include notes in archive folders in search?",
@@ -1317,9 +1313,9 @@ def _done_native(vault):
 
 def _read_env():
     """Parse .env into a dict (simple KEY=VALUE, ignores comments)."""
-    from src.launcher import _read_native_runtime
+    from src.launcher import load_native_runtime
 
-    saved = _read_native_runtime(OSM_CONFIG_DIR / "native_runtime.json")
+    saved = load_native_runtime(OSM_CONFIG_DIR)
     if saved is not None:
         return dict(saved)
     if not (_CODE_DIR / "pyproject.toml").is_file():
@@ -1342,7 +1338,6 @@ def _read_env():
 
 def cmd_vaults():
     """List the Obsidian vault(s) this install is indexing."""
-    header("OSM Vaults")
     hr()
 
     env = _read_env()
@@ -1376,7 +1371,6 @@ def cmd_vaults():
 
 def cmd_status():
     """Report health of the configured native services."""
-    header("OSM Status")
     hr()
     try:
         env = _read_env()
@@ -1478,13 +1472,13 @@ def cmd_status():
 
 def cmd_migrate():
     """Re-embed into a separate column, then activate the new model."""
-    from src.launcher import _read_native_runtime, write_native_runtime
+    from src.launcher import load_native_runtime, write_native_runtime
 
     target = _PARAMS.get("embedding_model")
     if not target:
         fail("Usage: osm migrate --embedding-model MODEL [--dry-run]")
         raise SystemExit(2)
-    settings = _read_native_runtime(OSM_CONFIG_DIR / "native_runtime.json")
+    settings = load_native_runtime(OSM_CONFIG_DIR)
     if not settings:
         fail("Run osm init first; migration needs installed native settings")
         raise SystemExit(1)
@@ -1492,7 +1486,6 @@ def cmd_migrate():
     if current == target:
         fail(f"{target} is already the configured model")
         raise SystemExit(1)
-    header("OSM Migrate — embedding model")
     info(f"Current: {current}; target: {target}")
     if not DRY_RUN and not confirm(
         f"Re-embed all notes with {target} and activate it after completion?",
@@ -1612,7 +1605,6 @@ def _version_tuple(v: str):
 
 
 def cmd_version():
-    header(f"osm v{APP_VERSION}")
     hr()
     info(f"Installed:  {APP_VERSION}")
     latest = _fetch_latest_release_tag()
@@ -1631,8 +1623,6 @@ def cmd_version():
 
 def cmd_update():
     """Show the package-manager command; updates belong to Homebrew."""
-    header("OSM Update")
-    hr()
     cmd_version()
     info("When installed from the tap, run: brew update && brew upgrade joynik/tap/osm")
 
@@ -1649,7 +1639,6 @@ def cmd_init():
         fail("This setup wizard currently supports native macOS only")
         sys.exit(1)
     _INIT_VAULTS = None
-    header(f"OSM v{APP_VERSION}")
     mode_native_macos()
 
 
@@ -1837,7 +1826,6 @@ def cmd_open(argv=None):
 
 
 def cmd_help():
-    header(f"OSM v{APP_VERSION}")
     info("Usage: osm <command> [flags]")
     table = Table(show_header=True, box=None, padding=(0, 2))
     table.add_column("Command", style="cyan bold")
@@ -1880,7 +1868,6 @@ def cmd_stop():
 
 def cmd_disconnect():
     """Remove OSM's user-level MCP registrations from supported clients."""
-    header("Disconnect OSM from MCP clients")
     remove_codex_config()
     remove_claude_code_config()
     remove_pi_agent_config()
@@ -1968,7 +1955,6 @@ COMMANDS = {
 
 def _menu_command() -> str | None:
     """Choose a CLI command when osm is started in a terminal without arguments."""
-    header(f"OSM v{APP_VERSION}")
     choices = [
         questionary.Choice(f"osm {name:<18} {description}", value=name)
         for name, (_, description) in COMMANDS.items()
@@ -2074,10 +2060,13 @@ def main():
         return
 
     if len(sys.argv) > 1 and sys.argv[1] == "open":
+        header(f"OSM v{APP_VERSION}")
         cmd_open(sys.argv[2:])
         return
 
     args, _PARAMS = _parse_flags(sys.argv[1:])
+
+    header(f"OSM v{APP_VERSION}")
 
     if args in (["-v"], ["-V"]):
         args = ["version"]

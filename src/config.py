@@ -94,7 +94,7 @@ REINDEX_LOCK_KEY = 8474927
 # Read at CALL time inside resolve_dashboard_token(), never cached in a
 # module-level constant computed once at import — that would make the
 # monkeypatch a no-op for any test that runs after the first import.
-OSM_CONFIG_DIR = Path.home() / ".config" / "obsidian-semantic-mcp"
+OSM_CONFIG_DIR = Path.home() / ".config" / "osm"
 DASHBOARD_TOKEN_FILE_NAME = "dashboard_token"
 
 
@@ -104,13 +104,13 @@ def resolve_dashboard_token() -> str:
     Precedence:
       1. DASHBOARD_TOKEN env var, if set — always wins, nothing is written.
          This option is useful for a process with an explicit token override.
-      2. ~/.config/obsidian-semantic-mcp/dashboard_token, if it exists —
+      2. ~/.config/osm/dashboard_token, if it exists —
          read and reused so the token survives restarts.
       3. Otherwise generate one with secrets.token_urlsafe(32), persist it
          at that path with mode 0600, and return it.
 
     Never written under the repo root; persistent config lives in
-    ~/.config/obsidian-semantic-mcp/.
+    ~/.config/osm/.
     """
     if env_token := os.environ.get("DASHBOARD_TOKEN"):
         return env_token
@@ -123,6 +123,18 @@ def resolve_dashboard_token() -> str:
                 return existing
         except OSError:
             pass  # unreadable (permissions, race) — fall through and regenerate
+
+    legacy_file = OSM_CONFIG_DIR.parent / "obsidian-semantic-mcp" / DASHBOARD_TOKEN_FILE_NAME
+    if legacy_file.exists():
+        try:
+            existing = legacy_file.read_text(encoding="utf-8").strip()
+            if existing:
+                OSM_CONFIG_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+                token_file.write_text(existing, encoding="utf-8")
+                token_file.chmod(0o600)
+                return existing
+        except OSError:
+            pass
 
     token = secrets.token_urlsafe(32)
     try:

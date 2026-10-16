@@ -30,7 +30,9 @@ from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
-OSM_CONFIG_DIR = Path.home() / ".config" / "obsidian-semantic-mcp"
+OSM_CONFIG_DIR = Path.home() / ".config" / "osm"
+RUNTIME_FILE_NAME = "runtime.json"
+LEGACY_RUNTIME_FILE_NAME = "native_runtime.json"
 OSM_LOG_PATH = Path.home() / ".local" / "state" / "obsidian-semantic-mcp" / "osm.log"
 
 
@@ -201,6 +203,43 @@ def _read_native_runtime(path):
         return _validate_native_runtime(json.loads(source.read(65537)))
 
 
+def load_native_runtime(config_dir=None):
+    """Load current settings, copying a validated legacy file on first use."""
+    directory = OSM_CONFIG_DIR if config_dir is None else Path(config_dir)
+    path = directory / RUNTIME_FILE_NAME
+    env = _read_native_runtime(path)
+    if env is not None:
+        return env
+
+    legacy = directory.parent / "obsidian-semantic-mcp" / LEGACY_RUNTIME_FILE_NAME
+    env = _read_native_runtime(legacy)
+    if env is None:
+        return None
+
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    info = directory.lstat()
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != os.geteuid()
+        or stat.S_IMODE(info.st_mode) & 0o022
+    ):
+        raise ValueError("unsafe native runtime directory")
+    encoded = json.dumps({"version": 1, "env": env}, ensure_ascii=False, indent=2) + "\n"
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    except FileExistsError:
+        return _read_native_runtime(path)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as target:
+            target.write(encoded)
+            target.flush()
+            os.fsync(target.fileno())
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+    return _read_native_runtime(path)
+
+
 def _valid_dashboard_port(value: str) -> bool:
     return value.isdecimal() and 1 <= int(value) <= 65535
 
@@ -251,7 +290,7 @@ def write_native_runtime(
         or stat.S_IMODE(info.st_mode) & 0o022
     ):
         raise ValueError("unsafe native runtime directory")
-    path = directory / "native_runtime.json"
+    path = directory / RUNTIME_FILE_NAME
     _read_native_runtime(path)
     fd, temporary = tempfile.mkstemp(prefix=".native-runtime-", dir=directory)
     try:
@@ -266,7 +305,7 @@ def write_native_runtime(
 
 
 def _load_native_runtime() -> bool:
-    env = _read_native_runtime(OSM_CONFIG_DIR / "native_runtime.json")
+    env = load_native_runtime()
     if env is None:
         return False
     for name, value in env.items():
@@ -291,7 +330,7 @@ def remove_native_runtime(config_dir=None):
         return
     if not stat.S_ISDIR(info.st_mode) or (os.name == "posix" and info.st_uid != os.geteuid()):
         raise ValueError("unsafe native runtime directory")
-    path = directory / "native_runtime.json"
+    path = directory / RUNTIME_FILE_NAME
     try:
         info = path.lstat()
     except FileNotFoundError:

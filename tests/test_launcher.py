@@ -36,14 +36,52 @@ def test_native_settings_start_server(tmp_path):
     server.assert_called_once()
     assert os.environ["EMBEDDING_MODEL"] == "nomic-embed-text-v2-moe"
     assert os.environ["OLLAMA_URL"] == "http://localhost:11434"
-    settings = launcher.OSM_CONFIG_DIR / "native_runtime.json"
+    settings = launcher.OSM_CONFIG_DIR / "runtime.json"
     assert settings.stat().st_mode & 0o777 == 0o600
     assert "OSM_DOCKER" not in json.loads(settings.read_text())["env"]
 
 
+def test_legacy_runtime_is_copied_without_changing_original(tmp_path):
+    legacy_dir = tmp_path / "obsidian-semantic-mcp"
+    launcher.write_native_runtime(
+        [str(tmp_path / "vault")],
+        "postgresql://localhost/osm",
+        config_dir=legacy_dir,
+        ollama_url="http://localhost:11434",
+    )
+    legacy = legacy_dir / "native_runtime.json"
+    (legacy_dir / "runtime.json").rename(legacy)
+    original = legacy.read_bytes()
+
+    loaded = launcher.load_native_runtime()
+
+    current = launcher.OSM_CONFIG_DIR / "runtime.json"
+    assert loaded["OBSIDIAN_VAULT"] == str(tmp_path / "vault")
+    assert current.stat().st_mode & 0o777 == 0o600
+    assert legacy.read_bytes() == original
+    assert json.loads(current.read_text())["env"] == json.loads(original)["env"]
+
+
+def test_current_runtime_takes_precedence_over_legacy(tmp_path):
+    legacy_dir = tmp_path / "obsidian-semantic-mcp"
+    launcher.write_native_runtime(
+        [str(tmp_path / "old")], "postgresql://localhost/old", config_dir=legacy_dir
+    )
+    (legacy_dir / "runtime.json").rename(legacy_dir / "native_runtime.json")
+    launcher.write_native_runtime([str(tmp_path / "new")], "postgresql://localhost/new")
+
+    loaded = launcher.load_native_runtime()
+
+    assert loaded["OBSIDIAN_VAULT"] == str(tmp_path / "new")
+    assert (
+        json.loads((launcher.OSM_CONFIG_DIR / "runtime.json").read_text())["env"]["DATABASE_URL"]
+        == "postgresql://localhost/new"
+    )
+
+
 def test_obsolete_runtime_key_is_rejected(tmp_path):
     launcher.write_native_runtime([str(tmp_path / "vault")], "postgresql://localhost/osm")
-    path = launcher.OSM_CONFIG_DIR / "native_runtime.json"
+    path = launcher.OSM_CONFIG_DIR / "runtime.json"
     saved = json.loads(path.read_text())
     saved["env"]["OSM_DOCKER"] = "0"
     path.write_text(json.dumps(saved))
@@ -55,7 +93,7 @@ def test_archive_choice_survives_runtime_reload(tmp_path):
     vault = tmp_path / "vault"
     vault.mkdir()
     launcher.write_native_runtime([str(vault)], "postgresql://localhost/osm", index_archive=True)
-    saved = launcher._read_native_runtime(launcher.OSM_CONFIG_DIR / "native_runtime.json")
+    saved = launcher._read_native_runtime(launcher.OSM_CONFIG_DIR / "runtime.json")
     assert saved["OBSIDIAN_INDEX_ARCHIVE"] == "yes"
 
 
@@ -79,7 +117,7 @@ def test_runtime_removal_keeps_other_files(tmp_path):
     unrelated.write_text("{}")
     launcher.remove_native_runtime()
     assert unrelated.exists()
-    assert not (launcher.OSM_CONFIG_DIR / "native_runtime.json").exists()
+    assert not (launcher.OSM_CONFIG_DIR / "runtime.json").exists()
 
 
 def test_stop_runs_signals_only_registered_server(monkeypatch):

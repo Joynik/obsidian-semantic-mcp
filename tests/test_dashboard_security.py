@@ -5,7 +5,7 @@ Postgres password to stdout.
 Iteration 2: every mutating dashboard endpoint requires a bearer token.
 
 Side-effect fence: no test in this file may read or write the real
-`~/.config/obsidian-semantic-mcp/` directory. `DASHBOARD_TOKEN` is set as a
+`~/.config/osm/` directory. `DASHBOARD_TOKEN` is set as a
 module-level env default before `dashboard` is ever imported, so importing
 or reloading the module always takes the env-override fast path in
 `config.resolve_dashboard_token()` and never touches the filesystem. Tests
@@ -272,12 +272,12 @@ def test_get_endpoints_remain_unauthenticated(monkeypatch):
 # ── Token file persistence — config.resolve_dashboard_token() ───────────────
 # Every test below monkeypatches config.OSM_CONFIG_DIR to a tmp_path and
 # explicitly deletes DASHBOARD_TOKEN from the env for the duration of the
-# test. Neither the real ~/.config/obsidian-semantic-mcp/ directory nor any
+# test. Neither the real ~/.config/osm/ directory nor any
 # path under the repo root is ever touched.
 
 
 def test_token_file_created_with_0600_when_absent(tmp_path, monkeypatch):
-    fake_config_dir = tmp_path / ".config" / "obsidian-semantic-mcp"
+    fake_config_dir = tmp_path / ".config" / "osm"
     monkeypatch.setattr(config, "OSM_CONFIG_DIR", fake_config_dir)
     monkeypatch.delenv("DASHBOARD_TOKEN", raising=False)
 
@@ -291,7 +291,7 @@ def test_token_file_created_with_0600_when_absent(tmp_path, monkeypatch):
 
 
 def test_token_file_is_reused_across_restarts(tmp_path, monkeypatch):
-    fake_config_dir = tmp_path / ".config" / "obsidian-semantic-mcp"
+    fake_config_dir = tmp_path / ".config" / "osm"
     monkeypatch.setattr(config, "OSM_CONFIG_DIR", fake_config_dir)
     monkeypatch.delenv("DASHBOARD_TOKEN", raising=False)
 
@@ -300,8 +300,24 @@ def test_token_file_is_reused_across_restarts(tmp_path, monkeypatch):
     assert first == second
 
 
+def test_legacy_dashboard_token_is_copied(tmp_path, monkeypatch):
+    fake_config_dir = tmp_path / ".config" / "osm"
+    legacy_dir = fake_config_dir.parent / "obsidian-semantic-mcp"
+    legacy_dir.mkdir(parents=True)
+    legacy_file = legacy_dir / "dashboard_token"
+    legacy_file.write_text("existing-token", encoding="utf-8")
+    monkeypatch.setattr(config, "OSM_CONFIG_DIR", fake_config_dir)
+    monkeypatch.delenv("DASHBOARD_TOKEN", raising=False)
+
+    assert config.resolve_dashboard_token() == "existing-token"
+    current_file = fake_config_dir / "dashboard_token"
+    assert current_file.read_text() == "existing-token"
+    assert current_file.stat().st_mode & 0o777 == 0o600
+    assert legacy_file.read_text() == "existing-token"
+
+
 def test_env_token_overrides_file(tmp_path, monkeypatch):
-    fake_config_dir = tmp_path / ".config" / "obsidian-semantic-mcp"
+    fake_config_dir = tmp_path / ".config" / "osm"
     monkeypatch.setattr(config, "OSM_CONFIG_DIR", fake_config_dir)
     monkeypatch.setenv("DASHBOARD_TOKEN", "the-env-token")
 
@@ -314,7 +330,7 @@ def test_env_token_overrides_file(tmp_path, monkeypatch):
 def test_token_is_never_written_to_repo_root(tmp_path, monkeypatch):
     """Guards the decoupling guardrail directly: no `.env`, `dashboard_token`,
     or similar new file appears under the repo root after token resolution."""
-    fake_config_dir = tmp_path / ".config" / "obsidian-semantic-mcp"
+    fake_config_dir = tmp_path / ".config" / "osm"
     monkeypatch.setattr(config, "OSM_CONFIG_DIR", fake_config_dir)
     monkeypatch.delenv("DASHBOARD_TOKEN", raising=False)
 
@@ -328,7 +344,7 @@ def test_token_is_never_written_to_repo_root(tmp_path, monkeypatch):
 def test_token_resolution_precedence(tmp_path, monkeypatch):
     """State machine: env-set -> env wins; env-unset + file-present -> file
     wins; env-unset + file-absent -> generate and persist."""
-    fake_config_dir = tmp_path / ".config" / "obsidian-semantic-mcp"
+    fake_config_dir = tmp_path / ".config" / "osm"
     monkeypatch.setattr(config, "OSM_CONFIG_DIR", fake_config_dir)
 
     # env-unset + file-absent -> generate and persist
@@ -350,7 +366,7 @@ def test_unreadable_token_file_falls_back_to_generated(tmp_path, monkeypatch):
     """Chaos: a config dir that exists but whose token file cannot be read
     (permissions, race) must not raise — fall back to a freshly generated
     token rather than crashing the dashboard at import time."""
-    fake_config_dir = tmp_path / ".config" / "obsidian-semantic-mcp"
+    fake_config_dir = tmp_path / ".config" / "osm"
     fake_config_dir.mkdir(parents=True)
     token_file = fake_config_dir / "dashboard_token"
     token_file.write_text("unreadable-content", encoding="utf-8")

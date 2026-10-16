@@ -144,6 +144,29 @@ def test_osm_run_dispatches_without_cli_output(monkeypatch, capsys):
     assert capsys.readouterr().out == ""
 
 
+@pytest.mark.parametrize(
+    "command", [*(name for name in osm_cli.COMMANDS if name not in {"run", "open"}), "-v", "-V"]
+)
+def test_commands_show_one_version_header(monkeypatch, capsys, command):
+    monkeypatch.setattr(osm_cli.sys, "argv", ["osm", command])
+    for name in osm_cli.COMMANDS:
+        monkeypatch.setitem(osm_cli.COMMANDS, name, (lambda: None, "Test command"))
+
+    osm_cli.main()
+
+    output = capsys.readouterr().out
+    assert output.count(f"OSM v{osm_cli.APP_VERSION}") == 1
+
+
+def test_open_shows_version_header(monkeypatch, capsys):
+    monkeypatch.setattr(osm_cli.sys, "argv", ["osm", "open", "--help"])
+    monkeypatch.setattr(osm_cli, "cmd_open", lambda argv: None)
+
+    osm_cli.main()
+
+    assert capsys.readouterr().out.count(f"OSM v{osm_cli.APP_VERSION}") == 1
+
+
 def test_codex_legacy_command_is_updated_without_touching_other_servers(monkeypatch, tmp_path):
     path = tmp_path / "config.toml"
     path.write_text(

@@ -17,7 +17,7 @@
 
 ## Installed command
 
-An installed command must not depend on the source checkout for execution, configuration, or data. Use paths relative to the installation root or standard user configuration paths such as `~/.config/obsidian-semantic-mcp/`.
+An installed command must not depend on the source checkout for execution, configuration, or data. Use paths relative to the installation root or standard user configuration paths such as `~/.config/osm/`.
 
 ## Code style
 
