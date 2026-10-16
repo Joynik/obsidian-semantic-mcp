@@ -1,0 +1,95 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "obsidian-semantic-mcp"
+version = "0.41.8"
+description = "Semantic search MCP server for Obsidian vaults"
+requires-python = ">=3.14,<3.15"
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/Joynik/obsidian-semantic-mcp"
+keywords = [
+    "obsidian",
+    "mcp",
+    "semantic-search",
+    "pgvector",
+    "qdrant",
+    "ollama",
+    "claude",
+]
+classifiers = [
+    "Intended Audience :: End Users/Desktop",
+    "Topic :: Office/Business :: Scheduling",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+    "mcp==2.3.0",
+    "psycopg2-binary==2.9.13",
+    "watchdog==6.0.0",
+    "requests==2.34.2",
+    "pyjwt==2.15.1",
+    "httpx==0.28.1",
+    "python-dotenv==1.2.4",
+    "pyyaml==6.0.3",
+    "tomlkit==0.15.2",
+    "rich>=15.0.0,<16",
+    "questionary>=2.1.1,<3",
+]
+
+[dependency-groups]
+dev = ["pytest>=9.1.1", "pytest-cov>=7.1.0", "ruff>=0.17.1", "ty>=0.0.89"]
+
+[project.scripts]
+osm = "osm_cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"osm_cli.py" = "osm_cli.py"
+"embedding-profiles/qwen3-embedding.json" = "src/embedding_profiles/qwen3-embedding.json"
+"embedding-profiles/nomic-embed-text-v2-moe.json" = "src/embedding_profiles/nomic-embed-text-v2-moe.json"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "pg: requires a live PostgreSQL *_test database (see tests/conftest.py pg fixture); excluded by `-m \"not pg\"`",
+    "qdrant: requires a local Qdrant service via PYTEST_QDRANT_URL and uses a disposable collection",
+    "ollama: requires a local Ollama service via PYTEST_OLLAMA_URL and an installed qwen3-embedding:0.6b model",
+    "perf: measures throughput/latency of bulk vault operations under load with a timing assertion; embed/DB calls are mocked so it exercises only index_vault's own file-walk/hash/link-build orchestration",
+]
+
+[tool.ruff]
+target-version = "py314"
+src = ["src"]
+line-length = 100
+
+[tool.ruff.lint]
+preview = true
+explicit-preview-rules = true
+select = ["E", "W", "F", "I", "UP", "B", "C4", "RUF100", "E303"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# The test suite is being reviewed separately; keep the new style rules on runtime code.
+"tests/**/*.py" = ["E303", "I", "UP", "B", "C4", "RUF100"]
+
+[tool.ty.environment]
+# Tests import modules from both the project root and src/.
+extra-paths = [".", "src", "tests"]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+# Baseline established 2026-07-21: total 58%, pg-marked tests run reliably in
+# Native test suite coverage floor.
+# Floor at 50 — well below current total, gives headroom for new code without
+# hiding a regression. Bump after src/server.py (48%) coverage grows.
+fail_under = 50
+show_missing = true

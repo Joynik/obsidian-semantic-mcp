@@ -1,0 +1,4 @@
+{
+  "document": "search_document: {text}",
+  "query": "search_query: {text}"
+}

@@ -1,0 +1,30 @@
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+secrets.json
+
+# Python environments and build output
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Local tool output
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+
+# Editor and macOS files
+.vscode/
+.idea/
+*.swp
+.DS_Store

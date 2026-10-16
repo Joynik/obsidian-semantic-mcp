@@ -1,0 +1,4 @@
+{
+  "document": "{text}",
+  "query": "Instruct: Given a search query, retrieve relevant passages from personal Obsidian notes.\nQuery: {text}"
+}
