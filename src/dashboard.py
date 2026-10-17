@@ -475,10 +475,10 @@ def gather_stats() -> dict:
     return stats
 
 
-HTML_PAGE = files("dashboard_ui").joinpath("index.html").read_text(encoding="utf-8")
-DASHBOARD_CSS = files("dashboard_ui").joinpath("dashboard.css").read_bytes()
-DASHBOARD_JS = files("dashboard_ui").joinpath("dashboard.js").read_bytes()
-DASHBOARD_I18N = files("dashboard_ui").joinpath("i18n.js").read_bytes()
+HTML_PAGE = files("src.dashboard_ui").joinpath("index.html").read_text(encoding="utf-8")
+DASHBOARD_CSS = files("src.dashboard_ui").joinpath("dashboard.css").read_bytes()
+DASHBOARD_JS = files("src.dashboard_ui").joinpath("dashboard.js").read_bytes()
+DASHBOARD_I18N = files("src.dashboard_ui").joinpath("i18n.js").read_bytes()
 HTML_PAGE = HTML_PAGE.replace("{{VERSION}}", f"v{APP_VERSION}")
 
 

@@ -17,6 +17,7 @@ import importlib
 import os
 import select
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -66,6 +67,36 @@ def test_smoke_dashboard_module_imports_cleanly():
     """Smoke: importing dashboard with DATABASE_URL set does not raise."""
     mod = _reload_dashboard()
     assert mod is dashboard
+
+
+def test_dashboard_assets_load_from_homebrew_install_layout(tmp_path):
+    """Homebrew copies src into libexec; dashboard assets must travel with it."""
+    libexec = tmp_path / "libexec"
+    shutil.copytree(
+        REPO_ROOT / "src", libexec / "src", ignore=shutil.ignore_patterns("__pycache__")
+    )
+    env = {
+        **os.environ,
+        "PYTHONPATH": str(libexec),
+        "HOME": str(tmp_path),
+        "OBSIDIAN_VAULT": str(tmp_path),
+        "DASHBOARD_PORT": "0",
+        "DASHBOARD_TOKEN": "test-fixture-token-not-a-secret",
+    }
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from src.dashboard import HTML_PAGE; assert 'Index health' in HTML_PAGE",
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_default_bind_is_loopback(monkeypatch):

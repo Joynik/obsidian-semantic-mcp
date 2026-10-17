@@ -19,7 +19,7 @@
 | `src/embedding_profiles.py`, `embedding-profiles/*.json` | Преобразование текста перед Ollama для конкретной семьи модели и профили, включаемые в wheel. |
 | `src/config.py` | Общие значения по умолчанию и функции настройки. |
 | `src/dashboard.py` | Локальный HTTP dashboard: API, статус, метрики и ручные операции с индексом. |
-| `dashboard_ui/` | Отдельные HTML, CSS и JavaScript для dashboard; пакет включён в wheel, темы переключаются в браузере. |
+| `src/dashboard_ui/` | Отдельные HTML, CSS и JavaScript для dashboard; пакет включён в wheel и устанавливается вместе с `src` через Homebrew. |
 | `pyproject.toml`, `uv.lock` | Версия, зависимости, CLI entry point, упаковка и инструменты разработки. |
 | `.env.example` | Пример настройки для запуска из исходников. |
 
