@@ -18,7 +18,8 @@
 | `src/migrations.py` | Безопасная смена модели эмбеддингов для PostgreSQL. |
 | `src/embedding_profiles.py`, `embedding-profiles/*.json` | Преобразование текста перед Ollama для конкретной семьи модели и профили, включаемые в wheel. |
 | `src/config.py` | Общие значения по умолчанию и функции настройки. |
-| `src/dashboard.py` | Локальный HTTP dashboard, статус, метрики и ручные операции с индексом. |
+| `src/dashboard.py` | Локальный HTTP dashboard: API, статус, метрики и ручные операции с индексом. |
+| `dashboard_ui/` | Отдельные HTML, CSS и JavaScript для dashboard; пакет включён в wheel, темы переключаются в браузере. |
 | `pyproject.toml`, `uv.lock` | Версия, зависимости, CLI entry point, упаковка и инструменты разработки. |
 | `.env.example` | Пример настройки для запуска из исходников. |
 

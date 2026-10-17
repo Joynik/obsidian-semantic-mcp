@@ -1859,8 +1859,8 @@ def _log_external_kill_diagnostic(signame: str) -> None:
         )
 
 
-def _shutdown(signame: str = "signal"):
-    """Stop the watcher and close the DB pool, then cancel the event loop.
+def _shutdown(stop_requested: asyncio.Event, signame: str = "signal"):
+    """Stop the watcher and close the DB pool, then request task cancellation.
 
     Called via loop.add_signal_handler() so it runs on the event loop thread,
     making it safe to call asyncio-adjacent code without deadlocking.
@@ -1874,7 +1874,7 @@ def _shutdown(signame: str = "signal"):
         obs.stop()
     if _pool is not None:
         _pool.closeall()
-    asyncio.get_event_loop().stop()
+    stop_requested.set()
 
 
 # ─────────────────────────── Wikilink Graph Expansion ───────────────────────
@@ -2730,18 +2730,19 @@ async def main():
     _STARTED_AT = _time.monotonic()
 
     loop = asyncio.get_event_loop()
+    stop_requested = asyncio.Event()
     if sys.platform != "win32":
-        loop.add_signal_handler(signal.SIGTERM, lambda: _shutdown("SIGTERM"))
-        loop.add_signal_handler(signal.SIGINT, lambda: _shutdown("SIGINT"))
+        loop.add_signal_handler(signal.SIGTERM, lambda: _shutdown(stop_requested, "SIGTERM"))
+        loop.add_signal_handler(signal.SIGINT, lambda: _shutdown(stop_requested, "SIGINT"))
         try:
-            loop.add_signal_handler(signal.SIGHUP, lambda: _shutdown("SIGHUP"))
+            loop.add_signal_handler(signal.SIGHUP, lambda: _shutdown(stop_requested, "SIGHUP"))
         except AttributeError, NotImplementedError:
             pass
     else:
         # Windows: add_signal_handler is not implemented on ProactorEventLoop.
         # signal.signal() on the main thread is the fallback.
-        signal.signal(signal.SIGINT, lambda *_: _shutdown("SIGINT"))
-        signal.signal(signal.SIGTERM, lambda *_: _shutdown("SIGTERM"))
+        signal.signal(signal.SIGINT, lambda *_: _shutdown(stop_requested, "SIGINT"))
+        signal.signal(signal.SIGTERM, lambda *_: _shutdown(stop_requested, "SIGTERM"))
 
     # Full index + watchers start in background — server is immediately ready
     threading.Thread(
@@ -2771,7 +2772,9 @@ async def main():
             while True:
                 # Thread-offload the blocking readline so the event loop
                 # stays free for _stdout_writer and server.run.
-                line = await anyio.to_thread.run_sync(sys.stdin.buffer.readline)
+                line = await anyio.to_thread.run_sync(
+                    sys.stdin.buffer.readline, abandon_on_cancel=True
+                )
                 if not line:
                     # EOF: stdin closed. Don't exit — Claude Desktop
                     # closes stdin between cycles. Sleep briefly and
@@ -2798,14 +2801,22 @@ async def main():
                 sys.stdout.write(json_str + "\n")
                 sys.stdout.flush()
 
+    async def _cancel_on_shutdown(scope: anyio.CancelScope):
+        await stop_requested.wait()
+        scope.cancel()
+
     async with anyio.create_task_group() as tg:
         tg.start_soon(_stdin_reader)
         tg.start_soon(_stdout_writer)
-        await server.run(
-            read_stream,
-            write_stream,
-            server.create_initialization_options(),
-        )
+        tg.start_soon(_cancel_on_shutdown, tg.cancel_scope)
+        try:
+            await server.run(
+                read_stream,
+                write_stream,
+                server.create_initialization_options(),
+            )
+        finally:
+            tg.cancel_scope.cancel()
 
 
 def run_server():

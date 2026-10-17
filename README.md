@@ -57,10 +57,12 @@ osm                 # Choose a command with the arrow keys
 osm status          # Check Ollama, database, and vaults
 osm vaults          # Show configured vaults
 osm logs --follow   # Watch server activity
-osm dashboard       # Open the optional local dashboard
+osm dashboard       # Start or restart the optional local dashboard
 osm dashboard stop
 osm stop            # Stop local OSM server processes
 ```
+
+The dashboard offers English, Russian, Ukrainian, French, Spanish, German, Portuguese, Simplified Chinese, and Japanese. It follows the browser language by default; a manual choice in the top bar is remembered.
 
 If Ollama is unavailable, a running OSM server keeps retrying; on macOS it notifies you after two minutes. `osm stop` does not stop Ollama or the database. A connected MCP client can start OSM again.
 

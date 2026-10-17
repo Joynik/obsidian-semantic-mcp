@@ -5,12 +5,8 @@ Postgres password to stdout.
 Iteration 2: every mutating dashboard endpoint requires a bearer token.
 
 Side-effect fence: no test in this file may read or write the real
-`~/.config/osm/` directory. `DASHBOARD_TOKEN` is set as a
-module-level env default before `dashboard` is ever imported, so importing
-or reloading the module always takes the env-override fast path in
-`config.resolve_dashboard_token()` and never touches the filesystem. Tests
-that specifically exercise file-based token persistence monkeypatch
-`config.OSM_CONFIG_DIR` to a `tmp_path` and explicitly unset
+`~/.config/osm/` directory. Tests that exercise file-based token persistence
+monkeypatch `config.OSM_CONFIG_DIR` to a `tmp_path` and explicitly unset
 `DASHBOARD_TOKEN` for the duration of that test only.
 """
 
@@ -34,10 +30,7 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-# Minimal env so server.py / dashboard.py import without crashing. Matches
-# the established pattern in tests/test_unit.py. DASHBOARD_TOKEN is set here
-# specifically so importing `dashboard` — which resolves a token at import
-# time to build HTML_PAGE — never touches the real config directory.
+# Minimal env so server.py / dashboard.py import without crashing.
 os.environ.setdefault("OBSIDIAN_VAULT", "/tmp/test_vault")
 os.environ.setdefault("DATABASE_URL", "postgresql://localhost/test")
 os.environ.setdefault("OLLAMA_URL", "http://localhost:11434")
@@ -87,11 +80,12 @@ def test_bind_cannot_be_overridden_to_wildcard(monkeypatch):
     assert mod.DASHBOARD_BIND == "127.0.0.1"
 
 
-def test_startup_banner_does_not_leak_password():
+def test_startup_banner_does_not_leak_password(tmp_path):
     """The startup banner must redact the PostgreSQL password."""
     secret = "s3cr3t-p4ssw0rd-marker"
     env = {
         **os.environ,
+        "HOME": str(tmp_path),
         "DATABASE_URL": f"postgresql://obsidian:{secret}@localhost:5432/obsidian_brain",
         "OBSIDIAN_VAULT": "/tmp/test_vault",
         "DASHBOARD_PORT": "0",  # OS picks a free ephemeral port — never binds a fixed one
@@ -118,6 +112,69 @@ def test_startup_banner_does_not_leak_password():
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+
+def test_dashboard_stop_closes_listening_port(tmp_path):
+    env = {
+        **os.environ,
+        "HOME": str(tmp_path),
+        "OBSIDIAN_VAULT": "/tmp/test_vault",
+        "DASHBOARD_PORT": "0",
+        "DASHBOARD_TOKEN": "test-fixture-token-not-a-secret",
+        "PYTHONUNBUFFERED": "1",
+    }
+    proc = subprocess.Popen(
+        [sys.executable, "-u", "-m", "src.dashboard"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=env,
+    )
+    try:
+        assert proc.stdout is not None
+        ready, _, _ = select.select([proc.stdout], [], [], 5)
+        assert ready, "dashboard did not start"
+        banner = proc.stdout.readline()
+        assert "Dashboard running at http://127.0.0.1:" in banner, banner
+        port = int(banner.rsplit(":", 1)[1])
+        page = requests.get(f"http://127.0.0.1:{port}/", timeout=2)
+        assert page.status_code == 200
+        assert page.headers["Cache-Control"] == "no-store"
+        assert '<script src="/dashboard.js"></script>' in page.text
+        assert '<script src="/i18n.js"></script>' in page.text
+        assert '<link rel="stylesheet" href="/dashboard.css">' in page.text
+        for asset, content_type in (
+            ("dashboard.css", "text/css"),
+            ("dashboard.js", "text/javascript"),
+            ("i18n.js", "text/javascript"),
+        ):
+            response = requests.get(f"http://127.0.0.1:{port}/{asset}", timeout=2)
+            assert response.status_code == 200
+            assert response.headers["Content-Type"].startswith(content_type)
+            assert response.headers["Cache-Control"] == "no-store"
+            assert "{{TOKEN}}" not in response.text
+        health = requests.get(f"http://127.0.0.1:{port}/api/health", timeout=2)
+        assert health.json()["ok"] is True
+        assert len(health.json()["instance"]) == 16
+        assert health.headers["Cache-Control"] == "no-store"
+
+        stopped = subprocess.run(
+            [sys.executable, "-m", "osm_cli", "dashboard", "stop"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+        assert stopped.returncode == 0, stopped.stdout + stopped.stderr
+        assert f"port {port} is closed" in stopped.stdout
+        proc.wait(timeout=2)
+        with pytest.raises(requests.ConnectionError):
+            requests.get(f"http://127.0.0.1:{port}/", timeout=1)
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            proc.wait(timeout=5)
 
 
 # ─────────────────────────────── Iteration 2 ────────────────────────────────
@@ -385,16 +442,25 @@ def test_unreadable_token_file_falls_back_to_generated(tmp_path, monkeypatch):
 
 
 def test_ui_script_sends_auth_header_on_every_post():
-    """Every `method: 'POST'` fetch in the rendered HTML_PAGE must carry an
+    """Every `method: 'POST'` fetch in dashboard JS must carry an
     Authorization header nearby in the same fetch() call."""
     mod = _reload_dashboard()
-    post_markers = [m.start() for m in re.finditer(r"method:\s*'POST'", mod.HTML_PAGE)]
-    assert post_markers, "no POST fetch calls found in HTML_PAGE — test itself may be broken"
+    script = mod.DASHBOARD_JS.decode()
+    post_markers = [m.start() for m in re.finditer(r"method:\s*'POST'", script)]
+    assert post_markers, "no POST fetch calls found in dashboard JS"
     for pos in post_markers:
-        window = mod.HTML_PAGE[max(0, pos - 250) : pos + 100]
+        window = script[max(0, pos - 250) : pos + 100]
         assert "Authorization" in window, (
             f"POST fetch near offset {pos} has no Authorization header nearby: {window!r}"
         )
+
+
+def test_dashboard_token_is_escaped_in_html_and_absent_from_static_js(monkeypatch):
+    monkeypatch.setattr(dashboard, "DASHBOARD_TOKEN", 'token"><script>bad()</script>')
+    page = dashboard._render_page().decode()
+    assert 'content="token&quot;&gt;&lt;script&gt;bad()&lt;/script&gt;"' in page
+    assert "<script>bad()</script>" not in page
+    assert b'token"><script>bad()' not in dashboard.DASHBOARD_JS
 
 
 def test_401_body_matches_existing_error_shape(monkeypatch):

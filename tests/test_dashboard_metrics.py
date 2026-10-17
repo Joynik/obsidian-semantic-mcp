@@ -165,18 +165,24 @@ def test_http_metrics_stats_and_unknown_route(monkeypatch):
 
 def test_dashboard_cards_use_safe_dom_values():
     html = dashboard.HTML_PAGE
+    script = dashboard.DASHBOARD_JS.decode()
     assert 'id="v-search-requests"' in html
-    assert "Current UTC hour + previous 23" in html
-    assert "Heure UTC actuelle" in html
-    assert "getElementById('v-search-requests').textContent" in html
-    assert "getElementById('d-search-backends').textContent" in html
+    assert "Current UTC hour and previous 23" in html
+    assert "Heure UTC actuelle" not in html
+    assert "Recherches" not in html
+    assert 'id="live-refresh" aria-label="Live updates" checked' in html
+    assert "getElementById('v-search-requests').textContent" in script
+    assert "getElementById('d-search-backends').textContent" in script
+    assert "path.textContent = result.path" in script
 
 
 def test_dashboard_script_element_references_exist_in_rendered_page():
     import re
 
     html = dashboard.HTML_PAGE
-    referenced = set(re.findall(r"getElementById\(['\"]([^'\"]+)['\"]", html))
+    referenced = set(
+        re.findall(r"getElementById\(['\"]([^'\"]+)['\"]", dashboard.DASHBOARD_JS.decode())
+    )
     defined = set(re.findall(r"id=['\"]([^'\"]+)['\"]", html))
     assert referenced
     assert referenced <= defined

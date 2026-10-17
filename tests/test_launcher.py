@@ -2,7 +2,10 @@
 
 import json
 import os
+import subprocess
+import sys
 import threading
+import time
 from unittest.mock import patch
 
 import pytest
@@ -137,3 +140,52 @@ def test_stop_runs_signals_only_registered_server(monkeypatch):
     finally:
         listener.close()
         path.unlink(missing_ok=True)
+
+
+def test_stop_runs_exits_server_without_event_loop_traceback(monkeypatch, tmp_path):
+    monkeypatch.setattr(launcher, "OSM_CONFIG_DIR", tmp_path / ".config" / "osm")
+    source = """
+import asyncio
+import os
+from pathlib import Path
+from src import server
+server.VAULT_PATHS = ['/tmp/osm-stop-test']
+server.background_init = lambda *_: None
+async def wait_forever(*_):
+    Path(os.environ['OSM_STOP_READY']).touch()
+    await asyncio.Event().wait()
+server.server.run = wait_forever
+from src.launcher import main
+main()
+"""
+    ready = tmp_path / "server-ready"
+    env = os.environ.copy()
+    env.update(
+        HOME=str(tmp_path),
+        OBSIDIAN_VAULT="/tmp/osm-stop-test",
+        OSM_DATABASE_BACKEND="qdrant",
+        QDRANT_URL="http://127.0.0.1:6333",
+        OSM_STOP_READY=str(ready),
+    )
+    process = subprocess.Popen(
+        [sys.executable, "-c", source],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not ready.exists() and process.poll() is None:
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.05)
+        assert ready.exists()
+        assert launcher.stop_runs()[0] == 1
+        _, stderr = process.communicate(timeout=5)
+        assert process.returncode == 0, stderr.decode()
+        assert b"Event loop stopped before Future completed" not in stderr
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate()

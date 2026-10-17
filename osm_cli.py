@@ -163,6 +163,16 @@ def _stdin_is_tty():
     return bool(getattr(sys.stdin, "isatty", lambda: False)())
 
 
+def _dashboard_port_available(port: str) -> bool:
+    """Check whether the dashboard can bind its local TCP address."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", int(port)))
+    except OSError:
+        return False
+    return True
+
+
 # ── Non-interactive params (set by CLI flags, consumed by prompt_*) ───────────
 
 # Keys: vault, pg_password, mode, persistent, data_dir,
@@ -1171,16 +1181,27 @@ def mode_native_macos():
                 choices=("russian", "english", "simple"),
                 param_key="search_language",
             )
-    dashboard_port = prompt(
-        "Dashboard port",
-        default=previous.get("DASHBOARD_PORT") or os.environ.get("DASHBOARD_PORT"),
-        param_key="dashboard_port",
-    )
     from src.launcher import _valid_dashboard_port
 
-    if not _valid_dashboard_port(dashboard_port):
-        fail("Dashboard port must be between 1 and 65535")
-        raise SystemExit(1)
+    default_port = previous.get("DASHBOARD_PORT") or os.environ.get("DASHBOARD_PORT")
+    while True:
+        dashboard_port = prompt(
+            "Dashboard port",
+            default=default_port,
+            param_key="dashboard_port",
+        )
+        if not _valid_dashboard_port(dashboard_port):
+            fail("Dashboard port must be between 1 and 65535")
+        elif _dashboard_port_available(dashboard_port):
+            break
+        elif _dashboard_control(b"OSM_DASHBOARD_PING\n") == f"PONG {dashboard_port}":
+            info(f"Dashboard is already running on port {dashboard_port}")
+            break
+        else:
+            fail(f"Dashboard port {dashboard_port} is unavailable; choose another port")
+        if "dashboard_port" in _PARAMS:
+            raise SystemExit(1)
+        default_port = None
 
     # Finish all checks before changing user configuration or registering clients.
     existing_vectors = False
@@ -1369,6 +1390,18 @@ def cmd_vaults():
 # ── Status command ────────────────────────────────────────────────────────────
 
 
+def _report_dashboard_status() -> None:
+    dashboard = _dashboard_control(b"OSM_DASHBOARD_PING\n")
+    if dashboard and dashboard.startswith("PONG "):
+        port = dashboard.removeprefix("PONG ")
+        if port.isdecimal() and _dashboard_port_open(port):
+            ok(f"Dashboard running: http://127.0.0.1:{port}")
+        else:
+            fail("Dashboard control socket is active, but its HTTP port is unavailable")
+    else:
+        warn("Dashboard not running; start with osm dashboard")
+
+
 def cmd_status():
     """Report health of the configured native services."""
     hr()
@@ -1376,6 +1409,7 @@ def cmd_status():
         env = _read_env()
     except (OSError, ValueError, TypeError) as exc:
         fail(f"Native configuration is invalid ({type(exc).__name__})")
+        _report_dashboard_status()
         return
     vaults = [v.strip() for v in env.get("OBSIDIAN_VAULTS", "").split(",") if v.strip()]
     if not vaults and env.get("OBSIDIAN_VAULT"):
@@ -1462,6 +1496,8 @@ def cmd_status():
     else:
         fail(f"Ollama unavailable: {ollama_url}")
         warn("Semantic search is waiting for Ollama; a running osm run retries automatically")
+
+    _report_dashboard_status()
 
 
 # ── Rebuild command ───────────────────────────────────────────────────────────
@@ -1659,13 +1695,37 @@ def _dashboard_control(command: bytes) -> str | None:
         return None
 
 
+def _dashboard_port_open(port: str) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=0.3):
+            return True
+    except OSError:
+        return False
+
+
+def _stop_running_dashboard(port: str) -> None:
+    if _dashboard_control(b"OSM_DASHBOARD_STOP\n") != "OK":
+        fail("Dashboard did not acknowledge the stop request")
+        raise SystemExit(1)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if _dashboard_control(b"OSM_DASHBOARD_PING\n") is None and not _dashboard_port_open(port):
+            return
+        time.sleep(0.1)
+    fail(f"Dashboard did not release port {port}; check its process")
+    raise SystemExit(1)
+
+
 def cmd_dashboard():
     """Start or stop the local dashboard independently of MCP clients."""
     if _PARAMS.get("dashboard_stop"):
-        if _dashboard_control(b"OSM_DASHBOARD_STOP\n") == "OK":
-            ok("Dashboard stopped")
-        else:
-            warn("Dashboard is not running")
+        running = _dashboard_control(b"OSM_DASHBOARD_PING\n")
+        if not running or not running.startswith("PONG "):
+            warn("Dashboard is not running; an open browser tab may still show the page")
+            return
+        port = running.split(" ", 1)[1]
+        _stop_running_dashboard(port)
+        ok(f"Dashboard stopped; port {port} is closed")
         return
 
     settings = _read_env()
@@ -1684,45 +1744,44 @@ def cmd_dashboard():
         fail("Set DASHBOARD_PORT in .env, run osm init, or export it in the shell")
         raise SystemExit(1)
     running = _dashboard_control(b"OSM_DASHBOARD_PING\n")
-    if running and running.startswith("PONG "):
-        port = running.split(" ", 1)[1]
-        ok("Dashboard is already running")
-    else:
-        log_path = OSM_LOG_PATH.with_name("dashboard.log")
-        log_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        fd = os.open(log_path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-        try:
-            details = os.fstat(fd)
-            if (
-                not stat.S_ISREG(details.st_mode)
-                or details.st_uid != os.geteuid()
-                or stat.S_IMODE(details.st_mode) != 0o600
-                or details.st_nlink != 1
-            ):
-                raise ValueError("unsafe dashboard log file")
-            process = subprocess.Popen(
-                [sys.executable, "-m", "src.dashboard"],
-                env=settings,
-                cwd="/",
-                stdin=subprocess.DEVNULL,
-                stdout=fd,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
-        finally:
-            os.close(fd)
-        for _ in range(50):
-            if _dashboard_control(b"OSM_DASHBOARD_PING\n") == f"PONG {port}":
-                break
-            if process.poll() is not None:
-                fail(f"Dashboard failed to start; see {log_path}")
-                raise SystemExit(1)
-            time.sleep(0.1)
-        else:
-            process.terminate()
+    restarting = bool(running and running.startswith("PONG "))
+    if restarting:
+        _stop_running_dashboard(running.split(" ", 1)[1])
+    log_path = OSM_LOG_PATH.with_name("dashboard.log")
+    log_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd = os.open(log_path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        details = os.fstat(fd)
+        if (
+            not stat.S_ISREG(details.st_mode)
+            or details.st_uid != os.geteuid()
+            or stat.S_IMODE(details.st_mode) != 0o600
+            or details.st_nlink != 1
+        ):
+            raise ValueError("unsafe dashboard log file")
+        process = subprocess.Popen(
+            [sys.executable, "-m", "src.dashboard"],
+            env=settings,
+            cwd="/",
+            stdin=subprocess.DEVNULL,
+            stdout=fd,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    finally:
+        os.close(fd)
+    for _ in range(50):
+        if _dashboard_control(b"OSM_DASHBOARD_PING\n") == f"PONG {port}":
+            break
+        if process.poll() is not None:
             fail(f"Dashboard did not become ready; see {log_path}")
             raise SystemExit(1)
-        ok("Dashboard started")
+        time.sleep(0.1)
+    else:
+        process.terminate()
+        fail(f"Dashboard did not become ready; see {log_path}")
+        raise SystemExit(1)
+    ok("Dashboard restarted" if restarting else "Dashboard started")
     url = f"http://127.0.0.1:{port}"
     info(f"Opening {url}")
     webbrowser.open(url)

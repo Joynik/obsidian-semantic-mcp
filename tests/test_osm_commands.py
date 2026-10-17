@@ -1,6 +1,7 @@
 """Native OSM command behavior."""
 
 import json
+import socket
 from unittest.mock import MagicMock
 
 import pytest
@@ -45,6 +46,41 @@ def test_native_setup_checks_services_before_writing(monkeypatch, tmp_path):
     osm_cli.mode_native_macos()
     assert len(writes) == 1
     assert writes[0][1]["embedding_model"] == "qwen3-embedding:0.6b"
+
+
+def test_dashboard_port_check_detects_listener():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        port = listener.getsockname()[1]
+        assert not osm_cli._dashboard_port_available(str(port))
+    assert osm_cli._dashboard_port_available(str(port))
+
+
+def test_native_setup_reprompts_for_occupied_dashboard_port(monkeypatch, tmp_path):
+    monkeypatch.setattr(osm_cli, "prompt_vault", lambda: [str(tmp_path)])
+    monkeypatch.setattr(osm_cli, "confirm", lambda *a, **k: False)
+    monkeypatch.setattr(osm_cli, "_read_env", lambda: {"DASHBOARD_PORT": "8484"})
+    monkeypatch.setattr(osm_cli, "_dashboard_port_available", lambda port: port != "8484")
+    monkeypatch.setattr(osm_cli, "_dashboard_control", lambda *_: None)
+    ports = iter(["8484", "8485"])
+
+    def fake_prompt(question, default=None, **kwargs):
+        if question == "Dashboard port":
+            return next(ports)
+        if question == "Database (postgresql/qdrant)":
+            return "postgresql"
+        return default
+
+    monkeypatch.setattr(osm_cli, "prompt", fake_prompt)
+    monkeypatch.setattr("src.postgres.inspect_setup", lambda *_: ("0.8.0", False, None))
+    monkeypatch.setattr(osm_cli, "_verify_ollama_model", lambda *_: True)
+    monkeypatch.setattr(osm_cli.requests, "get", lambda *a, **k: MagicMock(status_code=200))
+    monkeypatch.setattr(osm_cli, "register_with_clients", lambda *_: None)
+    writes = []
+    monkeypatch.setattr(osm_cli, "_write_native_runtime", lambda *a, **k: writes.append(k))
+    osm_cli.mode_native_macos()
+    assert writes[0]["dashboard_port"] == "8485"
 
 
 def test_native_setup_does_not_write_on_database_failure(monkeypatch, tmp_path):
@@ -96,10 +132,20 @@ def test_native_setup_rejects_unidentified_existing_vectors(monkeypatch, tmp_pat
 def test_status_without_configuration_reports_missing_services(monkeypatch, capsys):
     monkeypatch.setattr(osm_cli, "_read_env", lambda: {})
     monkeypatch.setattr(osm_cli, "check_ollama_at", lambda *_: False)
+    monkeypatch.setattr(osm_cli, "_dashboard_control", lambda *_: None)
     osm_cli.cmd_status()
     result = capsys.readouterr().out
     assert "Vault is not configured" in result
     assert "PostgreSQL" in result
+    assert "Dashboard not running" in result
+
+
+def test_status_reports_running_dashboard(monkeypatch, capsys):
+    monkeypatch.setattr(osm_cli, "_read_env", lambda: {})
+    monkeypatch.setattr(osm_cli, "_dashboard_control", lambda *_: "PONG 6543")
+    monkeypatch.setattr(osm_cli, "_dashboard_port_open", lambda port: port == "6543")
+    osm_cli.cmd_status()
+    assert "Dashboard running: http://127.0.0.1:6543" in capsys.readouterr().out
 
 
 def test_update_does_not_modify_services(monkeypatch, capsys):

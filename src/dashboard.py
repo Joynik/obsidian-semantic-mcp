@@ -13,12 +13,15 @@ import json
 import logging
 import math
 import os
+import secrets
 import socket
 import stat
 import subprocess
 import threading
 import time
 from datetime import UTC, datetime, timedelta
+from html import escape
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -53,6 +56,7 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "")
 EMBED_MODEL = os.environ.get("EMBEDDING_MODEL", DEFAULT_EMBED_MODEL)
 DASH_PORT = int(os.environ["DASHBOARD_PORT"])
 DASHBOARD_BIND = "127.0.0.1"
+DASHBOARD_INSTANCE = secrets.token_hex(8)
 
 DATABASE_URL = build_dsn()
 DATABASE_BACKEND = os.environ.get("OSM_DATABASE_BACKEND", "postgresql")
@@ -423,8 +427,8 @@ def gather_stats() -> dict:
         "recent_notes": [],
         "pg_version": "—",
         "pgvector_version": "—",
-        "db_label": "PostgreSQL",
-        "vector_label": "pgvector",
+        "db_label": "Qdrant" if DATABASE_BACKEND == "qdrant" else "PostgreSQL",
+        "vector_label": "Embedding model" if DATABASE_BACKEND == "qdrant" else "pgvector",
         "embedding_model": EMBED_MODEL,
     }
 
@@ -471,496 +475,33 @@ def gather_stats() -> dict:
     return stats
 
 
-HTML_PAGE = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Obsidian Semantic MCP — Monitor</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,500;0,700;1,400&family=Hanken+Grotesk:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<style>
-  /* Cobalt Grid palette, dashboard variant — cool blue-grey paper + navy-blue
-     ink (see ../semblar/design_references/max_graphic_design_mood/cobalt_grid_01.json,
-     recolored here from the source's warm-neutral paper for this UI) */
-  :root {
-    --paper: #E4E9F2; --paper-2: #D3DCEC; --ink: #1F3868; --ink-soft: #4F6FA8;
-    --grid: rgba(31,56,104,.10); --ink-faint: rgba(31,56,104,.18);
-    --serif: 'Newsreader', Georgia, serif;
-    --sans: 'Hanken Grotesk', -apple-system, sans-serif;
-    --mono: 'DM Mono', ui-monospace, monospace;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: var(--sans);
-    background: var(--paper); color: var(--ink); padding: 24px;
-    min-height: 100vh;
-  }
-  h1 { font-family: var(--serif); font-weight: 500; font-size: 1.6rem; color: var(--ink); margin-bottom: 8px; }
-  .subtitle { font-size: 0.85rem; color: var(--ink-soft); margin-bottom: 24px; font-style: italic; }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 16px; margin-bottom: 24px;
-  }
-  .card {
-    background: var(--paper-2); border-radius: 4px; padding: 20px;
-  }
-  .card-label { font-family: var(--sans); font-size: 0.75rem; text-transform: uppercase;
-    letter-spacing: 0.08em; color: var(--ink-soft); font-weight: 600; margin-bottom: 8px; }
-  .card-value { font-family: var(--mono); font-size: 1.8rem; font-weight: 500; }
-  .card-detail { font-size: 0.8rem; color: var(--ink-soft); margin-top: 4px; }
-  .status-row {
-    display: flex; gap: 24px; margin-bottom: 24px; flex-wrap: wrap;
-  }
-  .status {
-    display: flex; align-items: center; gap: 8px;
-    font-size: 0.9rem; background: var(--paper-2); padding: 10px 16px;
-    border-radius: 4px;
-  }
-  .dot {
-    width: 10px; height: 10px; border-radius: 50%;
-    display: inline-block; flex-shrink: 0;
-  }
-  .dot.green  { background: #22c55e; box-shadow: 0 0 6px #22c55e80; }
-  .dot.red    { background: #ef4444; box-shadow: 0 0 6px #ef444480; }
-  .dot.yellow { background: #eab308; box-shadow: 0 0 6px #eab30880; }
-  .dot.grey   { background: #9a9488; }
-  .recent { background: var(--paper-2); border-radius: 4px; padding: 20px;
-    margin-bottom: 24px; }
-  .recent h2 { font-family: var(--serif); font-weight: 500; font-size: 1.15rem; color: var(--ink); margin-bottom: 12px;
-    cursor: pointer; user-select: none; display: flex; align-items: center; gap: 8px; }
-  .recent h2 #recent-arrow { font-size: 0.8em; transition: transform 0.15s; display: inline-block; }
-  .recent h2.collapsed #recent-arrow { transform: rotate(-90deg); }
-  .recent-item {
-    display: flex; justify-content: space-between; padding: 6px 0;
-    border-bottom: 1px solid var(--ink-faint); font-size: 0.85rem;
-  }
-  .recent-item:last-child { border-bottom: none; }
-  .recent-path { font-family: var(--mono); color: var(--ink); overflow: hidden; text-overflow: ellipsis;
-    white-space: nowrap; max-width: 70%; }
-  .recent-time { color: var(--ink-soft); white-space: nowrap; }
-  .footer {
-    text-align: center; margin-top: 24px; font-size: 0.75rem; color: var(--ink-soft);
-  }
-  .error-msg { color: #ef4444; font-size: 0.8rem; margin-top: 4px; }
-  .btn {
-    background: var(--ink); color: var(--paper); border: none; padding: 6px 14px;
-    border-radius: 4px; font-size: 0.8rem; font-weight: 600;
-    cursor: pointer; margin-left: 8px; transition: opacity 0.2s;
-  }
-  .btn:hover { opacity: 0.85; }
-  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .btn-danger { background: #b3402f; color: #fff; }
-  .btn-standalone { margin-left: 0; }
-  .actions-row {
-    display: flex; gap: 10px; margin-bottom: 24px; flex-wrap: wrap;
-  }
-  .hidden { display: none !important; }
-  .indexing-banner {
-    background: var(--paper-2); border: 1.5px solid var(--ink-soft); border-radius: 4px;
-    padding: 10px 16px; margin-bottom: 24px; font-size: 0.85rem; color: var(--ink);
-    display: flex; align-items: center; gap: 10px;
-  }
-  .spinner {
-    width: 14px; height: 14px; border: 2px solid var(--ink-soft);
-    border-top-color: transparent; border-radius: 50%;
-    animation: spin 0.8s linear infinite; flex-shrink: 0;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .search-panel {
-    background: var(--paper-2); border-radius: 4px; padding: 20px;
-    margin-bottom: 24px;
-  }
-  .search-panel h2 { font-family: var(--serif); font-weight: 500; font-size: 1.15rem; color: var(--ink); margin-bottom: 14px; }
-  .search-controls {
-    display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;
-    margin-bottom: 14px;
-  }
-  .search-controls label {
-    display: flex; flex-direction: column; gap: 4px;
-    font-size: 0.75rem; color: var(--ink-soft); text-transform: uppercase;
-    letter-spacing: 0.08em; font-weight: 600;
-  }
-  .search-controls input[type="text"] {
-    background: var(--paper); border: 1.5px solid var(--ink-faint); border-radius: 4px;
-    color: var(--ink); padding: 7px 10px; font-size: 0.85rem; width: 320px;
-    outline: none; font-family: var(--sans);
-  }
-  .search-controls input[type="text"]:focus { border-color: var(--ink); }
-  .search-controls input[type="number"] {
-    background: var(--paper); border: 1.5px solid var(--ink-faint); border-radius: 4px;
-    color: var(--ink); padding: 7px 10px; font-size: 0.85rem; width: 80px;
-    outline: none; font-family: var(--mono);
-  }
-  .search-controls input[type="number"]:focus { border-color: var(--ink); }
-  .search-result {
-    border: 1.5px solid var(--ink-faint); border-radius: 4px; padding: 12px 14px;
-    margin-bottom: 10px; background: var(--paper);
-  }
-  .search-result:last-child { margin-bottom: 0; }
-  .search-result p { font-size: 0.82rem; color: var(--ink-soft); margin-top: 6px;
-    line-height: 1.5; }
-  .search-result code { font-family: var(--mono); font-size: 0.8rem; color: var(--ink); }
-  @media (max-width: 600px) {
-    .grid { grid-template-columns: 1fr 1fr; }
-    .search-controls input[type="text"] { width: 100%; }
-  }
-</style>
-</head>
-<body>
-
-<h1>Obsidian Semantic MCP</h1>
-<p class="subtitle">Monitoring Dashboard {{VERSION}} — auto-refreshes every 30s</p>
-
-<div class="status-row" id="statuses">
-  <div class="status"><span class="dot grey" id="dot-db"></span><span id="lbl-db">PostgreSQL</span><span class="error-msg" id="err-db"></span></div>
-  <div class="status"><span class="dot grey" id="dot-ollama"></span><span id="lbl-ollama">Ollama</span><button class="btn hidden" id="btn-ollama" onclick="startOllama()">Start</button></div>
-  <div class="status"><span class="dot grey" id="dot-model"></span><span id="lbl-model">Embedding Model</span></div>
-</div>
-
-<div class="actions-row">
-  <button class="btn btn-standalone" id="btn-reindex" onclick="triggerReindex(false)">Re-index</button>
-  <button class="btn btn-standalone" id="btn-rebuild" onclick="triggerReindex(true)">Safe Rebuild</button>
-</div>
-
-<div class="indexing-banner hidden" id="indexing-banner">
-  <div class="spinner"></div>
-  <span>Indexing in progress — stats will update on completion</span>
-</div>
-
-<div class="grid">
-  <div class="card">
-    <div class="card-label">Indexed Notes</div>
-    <div class="card-value" id="v-indexed">—</div>
-    <div class="card-detail" id="d-indexed"></div>
-  </div>
-  <div class="card">
-    <div class="card-label">Vault Files</div>
-    <div class="card-value" id="v-vault">—</div>
-    <div class="card-detail" id="d-vault"></div>
-  </div>
-  <div class="card">
-    <div class="card-label">Unindexed</div>
-    <div class="card-value" id="v-gap">—</div>
-    <div class="card-detail">files not yet embedded</div>
-  </div>
-  <div class="card">
-    <div class="card-label">Orphaned Embeddings</div>
-    <div class="card-value" id="v-orphaned">—</div>
-    <div class="card-detail">in DB but not on disk</div>
-  </div>
-  <div class="card">
-    <div class="card-label">DB Size</div>
-    <div class="card-value" id="v-dbsize">—</div>
-    <div class="card-detail" id="d-dbsize"></div>
-  </div>
-  <div class="card">
-    <div class="card-label">Last Indexed</div>
-    <div class="card-value" id="v-last">—</div>
-    <div class="card-detail" id="d-last"></div>
-  </div>
-  <div class="card">
-    <div class="card-label" id="lbl-vector">pgvector</div>
-    <div class="card-value" id="v-pgvec">—</div>
-    <div class="card-detail" id="d-pgver"></div>
-  </div>
-</div>
-
-<div class="grid">
-  <div class="card">
-    <div class="card-label">Searches / Recherches</div>
-    <div class="card-value" id="v-search-requests">—</div>
-    <div class="card-detail">Current UTC hour + previous 23 / Heure UTC actuelle + 23 précédentes</div>
-  </div>
-  <div class="card">
-    <div class="card-label">Search duration / Durée des recherches</div>
-    <div class="card-value" id="v-search-duration">—</div>
-    <div class="card-detail" id="d-search-outcomes"></div>
-  </div>
-  <div class="card">
-    <div class="card-label">Effective backend / Backend effectif</div>
-    <div class="card-detail" id="d-search-backends">—</div>
-  </div>
-</div>
-
-<div class="recent">
-  <h2 onclick="toggleRecent()" id="recent-toggle">Recently Indexed <span id="recent-arrow">&#9662;</span></h2>
-  <div id="recent-list"><div class="recent-item"><span class="recent-path">Loading...</span></div></div>
-</div>
-
-<div class="search-panel">
-  <h2>Test Search</h2>
-  <div class="search-controls">
-    <label>
-      Query
-      <input type="text" id="search-query" placeholder="Enter search query..." />
-    </label>
-    <label>
-      Mode
-      <select id="search-mode">
-        <option value="hybrid" selected>Hybrid</option>
-        <option value="semantic">Semantic</option>
-        <option value="keyword">Keyword</option>
-      </select>
-    </label>
-    <label id="vault-label" style="display:none">
-      Vault
-      <select id="search-vault"><option value="">All vaults</option></select>
-    </label>
-    <label>
-      Limit
-      <input type="number" id="search-limit" value="5" min="1" max="20" />
-    </label>
-    <label>
-      Min Similarity
-      <input type="number" id="search-min-sim" value="0.0" min="0.0" max="1.0" step="0.1" />
-    </label>
-    <button class="btn btn-standalone" onclick="testSearch()">Search</button>
-  </div>
-  <div id="search-results"></div>
-</div>
-
-<p class="footer" id="footer">Fetching...</p>
-
-<script>
-const DASHBOARD_TOKEN = "{{TOKEN}}";
-
-function timeAgo(iso) {
-  if (!iso) return '—';
-  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (diff < 60) return Math.floor(diff) + 's ago';
-  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
-  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
-  return Math.floor(diff / 86400) + 'd ago';
-}
-
-function dot(el, ok) {
-  el.className = 'dot ' + (ok ? 'green' : 'red');
-}
-
-function toggleRecent() {
-  document.getElementById('recent-list').classList.toggle('hidden');
-  document.getElementById('recent-toggle').classList.toggle('collapsed');
-}
-
-async function fetchStats() {
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 15000);
-    const r = await fetch('/api/stats', { signal: ctrl.signal });
-    clearTimeout(timer);
-    const s = await r.json();
-    const metrics = s.search_metrics;
-    if (metrics) {
-      document.getElementById('v-search-requests').textContent = metrics.available ? metrics.requests : '—';
-      document.getElementById('v-search-duration').textContent = metrics.available ? (metrics.duration_ms / 1000).toFixed(2) + ' s' : '—';
-      document.getElementById('d-search-outcomes').textContent =
-        'Results / Résultats: ' + metrics.results + ' · Errors / Erreurs: ' + metrics.errors;
-      const backends = {};
-      metrics.series.forEach(row => { backends[row.backend] = (backends[row.backend] || 0) + row.requests; });
-      document.getElementById('d-search-backends').textContent = metrics.available
-        ? (Object.entries(backends).map(([name, count]) => name + ': ' + count).join(' · ') || '0')
-        : 'Unavailable / Indisponible';
-    }
-
-    dot(document.getElementById('dot-db'), s.db_ok);
-    dot(document.getElementById('dot-ollama'), s.ollama_ok);
-    dot(document.getElementById('dot-model'), s.model_loaded);
-
-    document.getElementById('lbl-db').textContent =
-      s.db_ok ? s.db_label : s.db_label + ' — DOWN';
-    document.getElementById('err-db').textContent =
-      (!s.db_ok && s.db_error) ? s.db_error.split('\\n')[0] : '';
-    document.getElementById('lbl-ollama').textContent =
-      s.ollama_ok ? 'Ollama' : 'Ollama — DOWN';
-    document.getElementById('btn-ollama').classList.toggle('hidden', s.ollama_ok || !s.can_start_ollama);
-    document.getElementById('lbl-model').textContent =
-      s.model_loaded ? s.embedding_model : 'Model — NOT LOADED';
-    document.getElementById('lbl-vector').textContent = s.vector_label;
-
-    document.getElementById('v-indexed').textContent = s.indexed_count;
-    document.getElementById('v-vault').textContent = s.vault_file_count;
-    document.getElementById('v-gap').textContent = s.unindexed_count;
-    document.getElementById('v-orphaned').textContent =
-      s.orphaned_embeddings !== undefined ? s.orphaned_embeddings : '—';
-    document.getElementById('v-dbsize').textContent = s.db_size_human;
-    document.getElementById('v-last').textContent = timeAgo(s.last_indexed);
-    document.getElementById('d-last').textContent = s.last_indexed
-      ? new Date(s.last_indexed).toLocaleString() : '';
-    document.getElementById('v-pgvec').textContent =
-      s.db_label === 'Qdrant' ? s.pgvector_version : 'v' + s.pgvector_version;
-    document.getElementById('d-pgver').textContent = s.pg_version;
-
-    const coverage = s.vault_file_count > 0
-      ? Math.round(s.indexed_count / s.vault_file_count * 100) : 0;
-    document.getElementById('d-indexed').textContent = coverage + '% coverage';
-    document.getElementById('d-vault').textContent = '.md files in vault';
-
-    const list = document.getElementById('recent-list');
-    if (s.recent_notes.length === 0) {
-      list.innerHTML = '<div class="recent-item"><span class="recent-path">No notes indexed yet</span></div>';
-    } else {
-      list.innerHTML = '';
-      s.recent_notes.forEach(n => {
-        const row = document.createElement('div');
-        row.className = 'recent-item';
-        const pathEl = document.createElement('span');
-        pathEl.className = 'recent-path';
-        pathEl.textContent = n.path;
-        const timeEl = document.createElement('span');
-        timeEl.className = 'recent-time';
-        timeEl.textContent = n.indexed_at;
-        row.appendChild(pathEl);
-        row.appendChild(timeEl);
-        list.appendChild(row);
-      });
-    }
-
-    // Keep banner in sync with actual reindex state — prevents it getting
-    // stuck visible after a server restart or page reload.
-    if (!s.reindex_busy) {
-      document.getElementById('indexing-banner').classList.add('hidden');
-    }
-
-    document.getElementById('footer').textContent =
-      'Last refresh: ' + new Date().toLocaleTimeString() + ' — auto-refresh 30s';
-
-  } catch (e) {
-    const msg = e.name === 'AbortError' ? 'timed out' : e.message;
-    document.getElementById('footer').textContent =
-      'Service unreachable (' + msg + ') — run: osm status';
-    ['dot-db', 'dot-ollama', 'dot-model'].forEach(id => {
-      document.getElementById(id).className = 'dot grey';
-    });
-  }
-}
-
-function pollReindexDone(id, label) {
-  fetch('/api/reindex/status').then(r => r.json()).then(d => {
-    if (!d.busy) {
-      const btn = document.getElementById(id);
-      btn.disabled = false;
-      btn.textContent = label;
-      document.getElementById('indexing-banner').classList.add('hidden');
-      fetchStats();
-    } else {
-      setTimeout(() => pollReindexDone(id, label), 3000);
-    }
-  }).catch(() => {
-    setTimeout(() => pollReindexDone(id, label), 5000);
-  });
-}
-
-async function triggerReindex(full) {
-  if (full && !confirm('Build a new index, then switch to it? The previous index will be archived.')) return;
-  const id = full ? 'btn-rebuild' : 'btn-reindex';
-  const label = full ? 'Safe Rebuild' : 'Re-index';
-  const btn = document.getElementById(id);
-  btn.disabled = true;
-  btn.textContent = 'Starting\u2026';
-  try {
-    const r = await fetch(full ? '/api/reindex/full' : '/api/reindex', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + DASHBOARD_TOKEN },
-    });
-    const d = await r.json();
-    if (d.ok) {
-      btn.textContent = 'Running\u2026';
-      document.getElementById('indexing-banner').classList.remove('hidden');
-      setTimeout(() => pollReindexDone(id, label), 3000);
-    } else {
-      btn.textContent = 'Failed: ' + (d.message || '');
-      setTimeout(() => { btn.disabled = false; btn.textContent = label; }, 5000);
-    }
-  } catch (e) {
-    btn.textContent = 'Error';
-    setTimeout(() => { btn.disabled = false; btn.textContent = label; }, 5000);
-  }
-}
-
-async function startOllama() {
-  const btn = document.getElementById('btn-ollama');
-  btn.disabled = true;
-  btn.textContent = 'Starting...';
-  try {
-    const r = await fetch('/api/ollama/start', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + DASHBOARD_TOKEN },
-    });
-    const d = await r.json();
-    btn.textContent = d.ok ? 'Started' : 'Failed';
-    setTimeout(fetchStats, 3000);
-  } catch (e) {
-    btn.textContent = 'Error';
-  }
-  setTimeout(() => { btn.disabled = false; btn.textContent = 'Start'; }, 5000);
-}
-
-async function testSearch() {
-  const q = document.getElementById('search-query').value.trim();
-  if (!q) return;
-  const limit = document.getElementById('search-limit').value;
-  const minSim = document.getElementById('search-min-sim').value;
-  const mode = document.getElementById('search-mode').value;
-  const vault = document.getElementById('search-vault').value;
-  let url = `/api/search?q=${encodeURIComponent(q)}&limit=${limit}&min_similarity=${minSim}&mode=${mode}`;
-  if (vault) url += `&vault=${encodeURIComponent(vault)}`;
-  const res = await fetch(url);
-  const data = await res.json();
-  const div = document.getElementById('search-results');
-  if (!data.results || data.results.length === 0) {
-    div.innerHTML = '<p>No results.</p>';
-    return;
-  }
-  div.innerHTML = data.results.map(r => `
-    <div class="search-result">
-      <strong>${(r.similarity * 100).toFixed(1)}%</strong> \u2014 <code>${r.path}</code>
-      <p>${r.content.substring(0, 200)}...</p>
-    </div>
-  `).join('');
-}
-
-async function fetchVaults() {
-  try {
-    const r = await fetch('/api/vaults');
-    const d = await r.json();
-    if (!d.vaults || d.vaults.length <= 1) return;
-    const sel = document.getElementById('search-vault');
-    d.vaults.forEach(v => {
-      const opt = document.createElement('option');
-      opt.value = v.name;
-      opt.textContent = v.name;
-      sel.appendChild(opt);
-    });
-    document.getElementById('vault-label').style.display = '';
-  } catch (e) { /* single-vault — keep hidden */ }
-}
-
-fetchStats();
-fetchVaults();
-setInterval(fetchStats, 30000);
-</script>
-</body>
-</html>"""
-
+HTML_PAGE = files("dashboard_ui").joinpath("index.html").read_text(encoding="utf-8")
+DASHBOARD_CSS = files("dashboard_ui").joinpath("dashboard.css").read_bytes()
+DASHBOARD_JS = files("dashboard_ui").joinpath("dashboard.js").read_bytes()
+DASHBOARD_I18N = files("dashboard_ui").joinpath("i18n.js").read_bytes()
 HTML_PAGE = HTML_PAGE.replace("{{VERSION}}", f"v{APP_VERSION}")
-# {{TOKEN}} is deliberately NOT substituted here — see get_dashboard_token().
-# Import-time substitution would force token resolution (and its file write)
-# at import. The placeholder is filled per-request in _render_page().
 
 
 def _render_page() -> bytes:
     """Return the dashboard HTML with the live bearer token injected."""
-    return HTML_PAGE.replace("{{TOKEN}}", get_dashboard_token()).encode()
+    return HTML_PAGE.replace("{{TOKEN}}", escape(get_dashboard_token(), quote=True)).encode()
 
 
 class DashboardHandler(http.server.BaseHTTPRequestHandler):
+    def _asset_response(self, body: bytes, content_type: str) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _json_response(self, code: int, data: dict) -> None:
         body = json.dumps(data).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -992,7 +533,15 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path == "/api/search":
+        if parsed.path == "/dashboard.css":
+            self._asset_response(DASHBOARD_CSS, "text/css; charset=utf-8")
+        elif parsed.path == "/dashboard.js":
+            self._asset_response(DASHBOARD_JS, "text/javascript; charset=utf-8")
+        elif parsed.path == "/i18n.js":
+            self._asset_response(DASHBOARD_I18N, "text/javascript; charset=utf-8")
+        elif parsed.path == "/api/health":
+            self._json_response(200, {"ok": True, "instance": DASHBOARD_INSTANCE})
+        elif parsed.path == "/api/search":
             qs = parse_qs(parsed.query)
             query = qs.get("q", [""])[0].strip()
             limit = min(int(qs.get("limit", ["5"])[0]), 20)
@@ -1030,6 +579,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             body = _render_page()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -1123,6 +673,7 @@ class DashboardServer(http.server.ThreadingHTTPServer):
 def serve_dashboard() -> None:
     """Serve the dashboard until its private local control socket is stopped."""
     server = DashboardServer((DASHBOARD_BIND, DASH_PORT), DashboardHandler)
+    bound_port = server.server_port
     control_path = _run_directory() / "osm-dashboard.sock"
     if control_path.exists():
         details = control_path.lstat()
@@ -1154,14 +705,14 @@ def serve_dashboard() -> None:
                 with connection:
                     command = connection.recv(32)
                     if command == b"OSM_DASHBOARD_PING\n":
-                        connection.sendall(f"PONG {DASH_PORT}\n".encode("ascii"))
+                        connection.sendall(f"PONG {bound_port}\n".encode("ascii"))
                     elif command == b"OSM_DASHBOARD_STOP\n":
                         connection.sendall(b"OK\n")
                         server.shutdown()
                         return
 
         threading.Thread(target=control_loop, daemon=True, name="osm-dashboard-stop").start()
-        print(f"Dashboard running at http://{DASHBOARD_BIND}:{DASH_PORT}", flush=True)
+        print(f"Dashboard running at http://{DASHBOARD_BIND}:{bound_port}", flush=True)
         server.serve_forever()
     finally:
         control.close()
