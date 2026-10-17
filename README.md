@@ -68,28 +68,44 @@ If Ollama is unavailable, a running OSM server keeps retrying; on macOS it notif
 
 ## Connect clients manually
 
-You can connect clients during `osm init` or use the entries below. Restart the client after connecting. `OSM_ALLOW_WRITE=0` keeps note-writing tools disabled for that client; change it to `1` only when you want that client to edit notes.
+Run `osm init` first. If you skipped client connection during setup, add OSM to any client below. Each client launches `osm run` itself; you do not need a separate background OSM process. Restart the client after editing its configuration. `OSM_ALLOW_WRITE=0` disables note-writing tools for that client; use `1` only if you want that client to edit notes.
 
-| Client | Command |
-| --- | --- |
-| Codex | `codex mcp add obsidian-semantic --env OSM_ALLOW_WRITE=0 -- osm run` |
-| Claude Code | `claude mcp add --scope user obsidian-semantic -e OSM_ALLOW_WRITE=0 -- osm run` |
-| Pi | `pi mcp add obsidian-semantic --env OSM_ALLOW_WRITE=0 -- osm run` |
+| Client | Add OSM | Check |
+| --- | --- | --- |
+| Codex CLI and desktop app | `codex mcp add obsidian-semantic --env OSM_ALLOW_WRITE=0 -- osm run` | `codex mcp list` |
+| Claude Code | `claude mcp add --scope user obsidian-semantic -e OSM_ALLOW_WRITE=0 -- osm run` | `claude mcp list` |
+| Pi | `pi mcp add obsidian-semantic --env OSM_ALLOW_WRITE=0 -- osm run` | `pi mcp list` |
 
-For OpenCode, add this entry inside `mcp` in `~/.config/opencode/opencode.json`, keeping your other entries:
+**Claude Desktop (macOS):** Open `~/Library/Application Support/Claude/claude_desktop_config.json` and add `obsidian-semantic` inside its existing `mcpServers` object:
 
 ```json
 {
-  "obsidian-semantic": {
-    "type": "local",
-    "command": ["osm", "run"],
-    "enabled": true,
-    "environment": {"OSM_ALLOW_WRITE": "0"}
+  "mcpServers": {
+    "obsidian-semantic": {
+      "command": "osm",
+      "args": ["run"],
+      "env": {"OSM_ALLOW_WRITE": "0"}
+    }
   }
 }
 ```
 
-For Claude Desktop on macOS, add an `obsidian-semantic` entry under `mcpServers` in `~/Library/Application Support/Claude/claude_desktop_config.json` with `"command": "osm"`, `"args": ["run"]`, and `"env": {"OSM_ALLOW_WRITE": "0"}`. Run `osm disconnect` to remove OSM from supported clients; it does not remove notes, settings, or indexed data.
+**OpenCode:** Open `~/.config/opencode/opencode.json` and add `obsidian-semantic` inside its existing `mcp` object:
+
+```json
+{
+  "mcp": {
+    "obsidian-semantic": {
+      "type": "local",
+      "command": ["osm", "run"],
+      "enabled": true,
+      "environment": {"OSM_ALLOW_WRITE": "0"}
+    }
+  }
+}
+```
+
+Keep any other entries already in those JSON files. For OpenCode, check the connection with `opencode mcp list`. In Pi, use `/reload` after adding OSM. Run `osm disconnect` to remove OSM from supported clients; it does not remove notes, settings, or indexed data.
 
 ## Search and maintenance
 
