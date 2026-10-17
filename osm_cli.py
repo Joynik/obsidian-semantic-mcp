@@ -43,6 +43,7 @@ from rich.text import Text
 from src.config import DEFAULT_EMBED_MODEL
 from src.embedding_profiles import embedding_input
 from src.launcher import OSM_CONFIG_DIR, OSM_LOG_PATH
+from src.workers import child_command, run_worker
 from tomlkit.exceptions import TOMLKitError
 
 # Ensure stdout/stderr can handle Unicode on Windows (cp1252 etc.)
@@ -1575,13 +1576,7 @@ def cmd_migrate():
                 fail(f"Qdrant migration check failed: {exc}")
                 raise SystemExit(1) from exc
             return
-        code = (
-            "from src import server\n"
-            "with server.reindex_lock() as acquired:\n"
-            "    if not acquired: raise RuntimeError('reindex already in progress')\n"
-            "    print(server.rebuild_index_safely(server.VAULT_PATHS))\n"
-        )
-        result = run([sys.executable, "-c", code], env=env, check=False)
+        result = run(child_command("qdrant-rebuild"), env=env, check=False)
     else:
         result = _run_migration_snippet(target, dry_run=DRY_RUN, settings=settings)
     if result.returncode != 0:
@@ -1600,34 +1595,18 @@ def cmd_migrate():
         qdrant_url=settings.get("QDRANT_URL"),
         dashboard_port=settings.get("DASHBOARD_PORT"),
         search_language=settings.get("OSM_SEARCH_LANGUAGE"),
+        index_archive=settings.get("OBSIDIAN_INDEX_ARCHIVE") == "yes",
+        archive_folder=settings.get("OBSIDIAN_ARCHIVE_FOLDER"),
     )
     ok(f"Activated {target}. Restart MCP clients to load the new setting.")
-
-
-def _migration_snippet(target: str, *, dry_run: bool) -> str:
-    setup = "from src import server, migrations\n"
-    if not dry_run:
-        setup += "server.init_db(server.get_embed_dim())\n"
-    return setup + (
-        "conn = server._get_pool().getconn()\n"
-        "try:\n"
-        "    with server.reindex_lock() as acquired:\n"
-        "        if not acquired: raise RuntimeError('reindex already in progress')\n"
-        f"        target = {target!r}\n"
-        "        dimension = len(server.embed('dimension probe', model=target))\n"
-        f"        result = migrations.migrate_embedding_model(conn, target, dimension, "
-        f"lambda text: server.embed(text, model=target), dry_run={dry_run!r}, "
-        "chunk_fn=server.split_note)\n"
-        "        print(result)\n"
-        "finally:\n"
-        "    server._get_pool().putconn(conn)\n"
-    )
 
 
 def _run_migration_snippet(target: str, *, dry_run: bool, settings: dict):
     env = {**os.environ, **settings}
     return run(
-        [sys.executable, "-c", _migration_snippet(target, dry_run=dry_run)], env=env, check=False
+        child_command("postgres-migrate", target, "dry-run" if dry_run else "apply"),
+        env=env,
+        check=False,
     )
 
 
@@ -1780,7 +1759,7 @@ def cmd_dashboard():
         ):
             raise ValueError("unsafe dashboard log file")
         process = subprocess.Popen(
-            [sys.executable, "-m", "src.dashboard"],
+            child_command("dashboard", detached=True),
             env=settings,
             cwd="/",
             stdin=subprocess.DEVNULL,
@@ -1790,7 +1769,8 @@ def cmd_dashboard():
         )
     finally:
         os.close(fd)
-    for _ in range(50):
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
         if _dashboard_control(b"OSM_DASHBOARD_PING\n") == f"PONG {port}":
             break
         if process.poll() is not None:
@@ -2130,6 +2110,10 @@ def _parse_flags(args):
 
 def main():
     global DRY_RUN, _PARAMS
+
+    if len(sys.argv) > 1 and sys.argv[1] == "--osm-worker":
+        run_worker(sys.argv[2:])
+        return
 
     if len(sys.argv) > 1 and sys.argv[1] == "run":
         if len(sys.argv) != 2:

@@ -439,8 +439,14 @@ wheels = [
 ]
 
 [[package]]
+name = "nuitka"
+version = "4.3.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/da/0f/db5cfdebf906a6de141bfdadcd72a7417ba710ba9c9d307be185a69a7c8d/nuitka-4.3.1.tar.gz", hash = "sha256:b9c87a694acc424cfffa06abf149fddbdfa85f6daac998df67411b5f4269df0f", size = 4771037, upload-time = "2026-10-17T16:34:00.545Z" }
+
+[[package]]
 name = "obsidian-semantic-mcp"
-version = "0.45.1"
+version = "0.47.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -457,6 +463,9 @@ dependencies = [
 ]
 
 [package.dev-dependencies]
+build = [
+    { name = "nuitka" },
+]
 dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -480,6 +489,7 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
+build = [{ name = "nuitka", extras = ["onefile"], specifier = ">=4.3.1,<5" }]
 dev = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-cov", specifier = ">=7.1.0" },

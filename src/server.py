@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import contextlib
 import contextvars
 import fcntl
@@ -2750,48 +2751,43 @@ async def main():
         daemon=True,
     ).start()
 
-    # Raw stdin/stdout transport — avoids two known bugs:
-    #   1. anyio.wrap_file() EOF death (May 7 2026): anyio's async-for over
-    #      stdin exits when the client closes stdin between cycles, taking
-    #      the server down. Solved by using a blocking readline that
-    #      waits forever and treats EOF as "idle, retry."
-    #   2. Blocking-loop event-loop freeze (May 8 2026): a synchronous
-    #      `for line in sys.stdin.buffer:` in an async coroutine blocks
-    #      the entire asyncio event loop, so `_stdout_writer` cannot
-    #      schedule and the response is never written. Symptom: Claude
-    #      Code times out at 30s during initialize over a pipe that
-    #      stays open. Solved by offloading the blocking readline to a
-    #      worker thread via anyio.to_thread.run_sync, which keeps the
-    #      event loop free between reads.
+    # A daemon thread reads stdin so an open MCP pipe cannot hold up shutdown.
+    # The bounded queue preserves backpressure when a client sends many requests.
     read_writer, read_stream = anyio.create_memory_object_stream(0)
     write_stream, write_reader = anyio.create_memory_object_stream(0)
+    incoming: asyncio.Queue[bytes] = asyncio.Queue(maxsize=16)
+
+    def _read_stdin_blocking() -> None:
+        while not _STOPPING.is_set():
+            try:
+                chunk = os.read(sys.stdin.fileno(), 65536)
+            except OSError:
+                return
+            if not chunk:
+                _STOPPING.wait(0.1)
+                continue
+            try:
+                asyncio.run_coroutine_threadsafe(incoming.put(chunk), loop).result()
+            except concurrent.futures.CancelledError, RuntimeError:
+                return
+
+    threading.Thread(target=_read_stdin_blocking, daemon=True, name="osm-stdin").start()
 
     async def _stdin_reader():
+        pending = b""
         async with read_writer:
             while True:
-                # Thread-offload the blocking readline so the event loop
-                # stays free for _stdout_writer and server.run.
-                line = await anyio.to_thread.run_sync(
-                    sys.stdin.buffer.readline, abandon_on_cancel=True
-                )
-                if not line:
-                    # EOF: stdin closed. Don't exit — Claude Desktop
-                    # closes stdin between cycles. Sleep briefly and
-                    # retry; the thread offload will block in-thread
-                    # until new data arrives or stdin is fully gone.
-                    await anyio.sleep(0.1)
-                    continue
-                line_str = line.decode("utf-8").strip()
-                if not line_str:
-                    continue
-                try:
-                    # mcp 2.0.0 made JSONRPCMessage a bare Union type alias (no
-                    # .model_validate_json()); jsonrpc_message_adapter is the
-                    # TypeAdapter mcp's own stdio transport uses to parse it.
-                    message = jsonrpc_message_adapter.validate_json(line_str, by_name=False)
-                    await read_writer.send(SessionMessage(message))
-                except Exception as exc:
-                    await read_writer.send(exc)
+                pending += await incoming.get()
+                while b"\n" in pending:
+                    line, pending = pending.split(b"\n", 1)
+                    line_str = line.decode("utf-8").strip()
+                    if not line_str:
+                        continue
+                    try:
+                        message = jsonrpc_message_adapter.validate_json(line_str, by_name=False)
+                        await read_writer.send(SessionMessage(message))
+                    except Exception as exc:
+                        await read_writer.send(exc)
 
     async def _stdout_writer():
         async with write_reader:

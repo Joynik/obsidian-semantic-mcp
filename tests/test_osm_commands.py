@@ -2,11 +2,13 @@
 
 import json
 import socket
+import sys
 from unittest.mock import MagicMock
 
 import pytest
 
 import osm_cli
+from src import workers
 
 
 @pytest.fixture(autouse=True)
@@ -22,6 +24,30 @@ def test_only_native_commands_are_exposed():
     assert "version" in osm_cli.COMMANDS
     assert "rebuild" not in osm_cli.COMMANDS
     assert "tunnel" not in osm_cli.COMMANDS
+
+
+def test_worker_command_uses_python_module_in_checkout(monkeypatch):
+    monkeypatch.delattr(workers, "__compiled__", raising=False)
+    assert workers.child_command("dashboard") == [sys.executable, "-m", "src.workers", "dashboard"]
+
+
+def test_worker_command_restarts_frozen_executable(monkeypatch):
+    compiled = type("Compiled", (), {"process_exe": "/path/to/osm"})()
+    monkeypatch.setattr(workers, "__compiled__", compiled, raising=False)
+    assert workers.child_command("dashboard") == ["/path/to/osm", "--osm-worker", "dashboard"]
+
+
+def test_detached_worker_uses_distributed_binary(monkeypatch, tmp_path):
+    binary = tmp_path / "osm"
+    binary.touch(mode=0o755)
+    compiled = type("Compiled", (), {"process_exe": "/temporary/unpacked/osm"})()
+    monkeypatch.setattr(workers, "__compiled__", compiled, raising=False)
+    monkeypatch.setattr(sys, "argv", [str(binary), "dashboard"])
+    assert workers.child_command("dashboard", detached=True) == [
+        str(binary),
+        "--osm-worker",
+        "dashboard",
+    ]
 
 
 @pytest.mark.parametrize("archive_name", ["Archive", "Old Notes"])

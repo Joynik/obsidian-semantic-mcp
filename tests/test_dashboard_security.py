@@ -145,7 +145,8 @@ def test_startup_banner_does_not_leak_password(tmp_path):
             proc.kill()
 
 
-def test_dashboard_stop_closes_listening_port(tmp_path):
+@pytest.mark.parametrize("module_args", [["src.dashboard"], ["src.workers", "dashboard"]])
+def test_dashboard_stop_closes_listening_port(tmp_path, module_args):
     env = {
         **os.environ,
         "HOME": str(tmp_path),
@@ -155,7 +156,7 @@ def test_dashboard_stop_closes_listening_port(tmp_path):
         "PYTHONUNBUFFERED": "1",
     }
     proc = subprocess.Popen(
-        [sys.executable, "-u", "-m", "src.dashboard"],
+        [sys.executable, "-u", "-m", *module_args],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,

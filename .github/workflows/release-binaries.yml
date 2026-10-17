@@ -1,0 +1,94 @@
+name: Build macOS binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            architecture: arm64
+          - runner: macos-15-intel
+            architecture: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+
+      - name: Install build and test dependencies
+        run: uv sync --locked --python 3.14 --group build
+
+      - name: Check release version and architecture
+        env:
+          EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
+        run: |
+          version="$(uv run --no-sync python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          test "$(uname -m)" = "$EXPECTED_ARCHITECTURE"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            test "$GITHUB_REF_NAME" = "v$version"
+          fi
+
+      - name: Run checks
+        run: |
+          uv run --no-sync ruff check osm_cli.py src
+          uv run --no-sync ruff format --check osm_cli.py src
+          uv run --no-sync ty check osm_cli.py src
+          uv run --no-sync pytest -q
+
+      - name: Build and package onefile executable
+        env:
+          EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
+          COPYFILE_DISABLE: "1"
+        run: |
+          uv run --no-sync python binary-build/build.py --onefile
+          binary-build/output/osm help > /dev/null
+          version="$(uv run --no-sync python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          mkdir -p binary-build/release
+          tar -czf "binary-build/release/osm-v${version}-macos-${EXPECTED_ARCHITECTURE}.tar.gz" \
+            -C binary-build/output osm -C "$GITHUB_WORKSPACE" LICENSE
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: osm-macos-${{ matrix.architecture }}
+          path: binary-build/release/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: osm-macos-*
+          merge-multiple: true
+          path: dist
+
+      - name: Verify both archives and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          test -f "osm-${GITHUB_REF_NAME}-macos-arm64.tar.gz"
+          test -f "osm-${GITHUB_REF_NAME}-macos-x86_64.tar.gz"
+          sha256sum "osm-${GITHUB_REF_NAME}-macos-arm64.tar.gz" \
+            "osm-${GITHUB_REF_NAME}-macos-x86_64.tar.gz" > SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" \
+            "osm-${GITHUB_REF_NAME}-macos-arm64.tar.gz" \
+            "osm-${GITHUB_REF_NAME}-macos-x86_64.tar.gz" \
+            SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "OSM $GITHUB_REF_NAME" \
+            --notes "macOS binaries for Homebrew."

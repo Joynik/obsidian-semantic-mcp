@@ -2,10 +2,12 @@
 
 import json
 import os
+import select
 import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -203,6 +205,67 @@ main()
         _, stderr = process.communicate(timeout=5)
         assert process.returncode == 0, stderr.decode()
         assert b"Event loop stopped before Future completed" not in stderr
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate()
+
+
+def test_stop_runs_exits_real_server_with_open_stdin(monkeypatch, tmp_path):
+    config_dir = tmp_path / ".config" / "osm"
+    monkeypatch.setattr(launcher, "OSM_CONFIG_DIR", config_dir)
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "note.md").write_text("# Note\n")
+    env = os.environ.copy()
+    env.update(
+        HOME=str(tmp_path),
+        OBSIDIAN_VAULT=str(vault),
+        OSM_DATABASE_BACKEND="qdrant",
+        QDRANT_URL="http://127.0.0.1:1",
+        OLLAMA_URL="http://127.0.0.1:1",
+        PYTHONUNBUFFERED="1",
+    )
+    process = subprocess.Popen(
+        [sys.executable, "-m", "osm_cli", "run"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        cwd=Path(__file__).resolve().parent.parent,
+    )
+    try:
+        assert process.stdin is not None and process.stdout is not None
+        process.stdin.write(
+            (
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2025-06-18",
+                            "capabilities": {},
+                            "clientInfo": {"name": "stop-test", "version": "1"},
+                        },
+                    }
+                )
+                + "\n"
+            ).encode()
+        )
+        process.stdin.flush()
+        ready, _, _ = select.select([process.stdout], [], [], 10)
+        assert ready, "MCP initialize did not respond with stdin open"
+        assert json.loads(process.stdout.readline())["id"] == 1
+
+        deadline = time.monotonic() + 5
+        while not list(launcher._run_path().glob("osm-run-*.sock")):
+            assert time.monotonic() < deadline, "OSM run socket did not appear"
+            time.sleep(0.05)
+        assert launcher.stop_runs()[0] == 1
+        assert process.wait(timeout=5) == 0
+        assert process.stderr is not None
+        assert b"Event loop stopped before Future completed" not in process.stderr.read()
     finally:
         if process.poll() is None:
             process.kill()

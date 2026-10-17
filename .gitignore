@@ -16,6 +16,9 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+/binary-build/output/
+/binary-build/cache/
+/binary-build/release/
 
 # Local tool output
 .pytest_cache/
