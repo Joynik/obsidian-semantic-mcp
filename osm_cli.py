@@ -1062,6 +1062,7 @@ def _write_native_runtime(
     dashboard_port=None,
     search_language=None,
     index_archive=None,
+    archive_folder=None,
 ):
     from src.launcher import write_native_runtime
 
@@ -1082,6 +1083,7 @@ def _write_native_runtime(
         dashboard_port=dashboard_port,
         search_language=search_language,
         index_archive=index_archive,
+        archive_folder=archive_folder,
     )
 
 
@@ -1098,8 +1100,25 @@ def mode_native_macos():
         "Include notes in archive folders in search?",
         default="y" if previous.get("OBSIDIAN_INDEX_ARCHIVE") == "yes" else "n",
     )
+    archive_folder = previous.get("OBSIDIAN_ARCHIVE_FOLDER", "Archive")
+    if not index_archive:
+        while True:
+            archive_folder = prompt("Archive folder name to exclude", default=archive_folder)
+            if archive_folder not in {".", ".."} and not any(
+                char in archive_folder for char in ("/", "\\", "\x00", "\r", "\n")
+            ):
+                break
+            warn("Enter one folder name without path separators")
     if previous.get("OBSIDIAN_INDEX_ARCHIVE") == "yes" and not index_archive:
         warn("Archive notes already indexed remain searchable until Safe Rebuild completes")
+    if (
+        previous
+        and not index_archive
+        and previous.get("OBSIDIAN_ARCHIVE_FOLDER", "archive") != archive_folder
+    ):
+        warn(
+            "Notes from the previous archive folder remain searchable until Safe Rebuild completes"
+        )
     default_backend = previous.get("OSM_DATABASE_BACKEND", "qdrant")
     if _stdin_is_tty() and "database_backend" not in _PARAMS:
         backend = questionary.select(
@@ -1295,6 +1314,7 @@ def mode_native_macos():
         dashboard_port=dashboard_port,
         search_language=search_language,
         index_archive=index_archive,
+        archive_folder=archive_folder,
     )
     entry = _native_entry(vaults, db_url)
     installed_command = shutil.which("osm")

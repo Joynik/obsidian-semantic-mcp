@@ -46,7 +46,7 @@ osm status
 
 For development from this checkout, install [uv](https://docs.astral.sh/uv/), run `uv sync --python 3.14`, copy `.env.example` to `.env`, fill in your paths and URLs, then use `uv run osm ...`. Saved `osm init` settings take precedence over the checkout `.env`.
 
-The wizard asks separately before connecting each MCP client and before granting that client write access. Both answers default to **No**. Files in folders named `archive` are excluded from indexing by default; `osm init` can include them.
+The wizard asks separately before connecting each MCP client and before granting that client write access. Both answers default to **No**. `osm init` can exclude an archive folder from indexing; its default name is `Archive`, and you can enter another folder name.
 
 ## Run and check
 
@@ -103,7 +103,7 @@ osm migrate --embedding-model MODEL --dry-run
 osm migrate --embedding-model MODEL
 ```
 
-Migration builds new vectors before switching the active index. The dashboard's **Safe Rebuild** similarly keeps the previous index until a new one is ready. If you stop indexing `archive` folders after they were already indexed, use Safe Rebuild to remove those notes from active search. Neither operation deletes Obsidian files.
+Migration builds new vectors before switching the active index. The dashboard's **Safe Rebuild** similarly keeps the previous index until a new one is ready. If you change the excluded archive folder after its notes were indexed, use Safe Rebuild to remove those notes from active search. Neither operation deletes Obsidian files.
 
 Other commands: `osm open --vault PATH NOTE.md` opens a note in Obsidian; `osm version`, `osm -v`, and `osm -V` check the installed version; `osm update` shows the Homebrew update command; `osm help` lists all commands.
 

@@ -117,6 +117,7 @@ def _validate_native_runtime(data):
         "DASHBOARD_PORT",
         "OSM_SEARCH_LANGUAGE",
         "OBSIDIAN_INDEX_ARCHIVE",
+        "OBSIDIAN_ARCHIVE_FOLDER",
     } | vault_keys
     backend = env.get("OSM_DATABASE_BACKEND", "postgresql")
     required_env = ({"DATABASE_URL"} if backend == "postgresql" else {"QDRANT_URL"}) | vault_keys
@@ -168,6 +169,13 @@ def _validate_native_runtime(data):
         raise ValueError("invalid text search language")
     if env.get("OBSIDIAN_INDEX_ARCHIVE", "no") not in ("yes", "no"):
         raise ValueError("invalid archive indexing setting")
+    archive_folder = env.get("OBSIDIAN_ARCHIVE_FOLDER")
+    if archive_folder is not None and (
+        archive_folder != archive_folder.strip()
+        or archive_folder in {".", ".."}
+        or any(char in archive_folder for char in ("/", "\\", "\r", "\n"))
+    ):
+        raise ValueError("invalid archive folder name")
     vaults = (
         env[next(iter(vault_keys))].split(",")
         if "OBSIDIAN_VAULTS" in vault_keys
@@ -255,6 +263,7 @@ def write_native_runtime(
     dashboard_port=None,
     search_language=None,
     index_archive=None,
+    archive_folder=None,
 ):
     """Atomically persist native settings outside every MCP client's config."""
     vaults = [vaults] if isinstance(vaults, str) else list(vaults)
@@ -273,6 +282,8 @@ def write_native_runtime(
         env["OSM_SEARCH_LANGUAGE"] = search_language
     if index_archive is not None:
         env["OBSIDIAN_INDEX_ARCHIVE"] = "yes" if index_archive else "no"
+    if archive_folder is not None:
+        env["OBSIDIAN_ARCHIVE_FOLDER"] = archive_folder
     if not vaults:
         raise ValueError("native runtime requires a vault")
     env["OBSIDIAN_VAULTS" if len(vaults) > 1 else "OBSIDIAN_VAULT"] = ",".join(vaults)

@@ -267,7 +267,6 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-_DEFAULT_IGNORED_PATH_SEGMENTS = {"archive"}
 _ALWAYS_SKIPPED_PATH_SEGMENTS = {".obsidian", ".trash", ".git"}
 
 
@@ -944,19 +943,19 @@ def _embed_and_upsert_batch(items: list[tuple[str, str, str]], vault_id: str = "
 def _ignored_path_segments() -> set[str]:
     """Return ignored vault path segments.
 
-    OBSIDIAN_IGNORE_PATHS replaces the default archive exclusion when set.
-    Set it to an empty string to allow archive/ content to be indexed.
+    OBSIDIAN_IGNORE_PATHS replaces the configured archive exclusion when set.
+    Set it to an empty string to allow archive content to be indexed.
     """
     raw = os.environ.get("OBSIDIAN_IGNORE_PATHS")
     if raw is None:
         if os.environ.get("OBSIDIAN_INDEX_ARCHIVE") == "yes":
             return set()
-        return set(_DEFAULT_IGNORED_PATH_SEGMENTS)
+        return {os.environ.get("OBSIDIAN_ARCHIVE_FOLDER", "archive")}
     return {segment.strip() for segment in raw.split(",") if segment.strip()}
 
 
 def _should_skip_path(path: Path) -> bool:
-    """Skip hidden/system directories and archive/ relative to any vault root.
+    """Skip hidden/system directories and configured archive folders.
 
     Falls back to VAULT_PATH when VAULT_PATHS is empty (test environments and
     single-vault setups that patch VAULT_PATH directly).

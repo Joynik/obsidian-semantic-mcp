@@ -100,6 +100,24 @@ def test_archive_choice_survives_runtime_reload(tmp_path):
     assert saved["OBSIDIAN_INDEX_ARCHIVE"] == "yes"
 
 
+def test_archive_folder_survives_runtime_reload(tmp_path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    launcher.write_native_runtime(
+        [str(vault)], "postgresql://localhost/osm", index_archive=False, archive_folder="Old Notes"
+    )
+    saved = launcher._read_native_runtime(launcher.OSM_CONFIG_DIR / "runtime.json")
+    assert saved["OBSIDIAN_ARCHIVE_FOLDER"] == "Old Notes"
+
+
+@pytest.mark.parametrize("name", ["", ".", "..", "Parent/Archive", "Parent\\Archive"])
+def test_invalid_archive_folder_is_rejected(tmp_path, name):
+    with pytest.raises(ValueError):
+        launcher.write_native_runtime(
+            [str(tmp_path / "vault")], "postgresql://localhost/osm", archive_folder=name
+        )
+
+
 def test_missing_configuration_exits(monkeypatch):
     monkeypatch.setattr(launcher, "_load_checkout_env", lambda: None)
     with pytest.raises(SystemExit) as error:

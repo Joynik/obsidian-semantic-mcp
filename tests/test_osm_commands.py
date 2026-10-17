@@ -24,9 +24,16 @@ def test_only_native_commands_are_exposed():
     assert "tunnel" not in osm_cli.COMMANDS
 
 
-def test_native_setup_checks_services_before_writing(monkeypatch, tmp_path):
+@pytest.mark.parametrize("archive_name", ["Archive", "Old Notes"])
+def test_native_setup_checks_services_before_writing(monkeypatch, tmp_path, archive_name):
     monkeypatch.setattr(osm_cli, "prompt_vault", lambda: [str(tmp_path)])
-    monkeypatch.setattr(osm_cli, "prompt", lambda question, default=None, **kw: default)
+    monkeypatch.setattr(
+        osm_cli,
+        "prompt",
+        lambda question, default=None, **kw: (
+            archive_name if question == "Archive folder name to exclude" else default
+        ),
+    )
     monkeypatch.setattr(
         osm_cli,
         "_read_env",
@@ -46,6 +53,7 @@ def test_native_setup_checks_services_before_writing(monkeypatch, tmp_path):
     osm_cli.mode_native_macos()
     assert len(writes) == 1
     assert writes[0][1]["embedding_model"] == "qwen3-embedding:0.6b"
+    assert writes[0][1]["archive_folder"] == archive_name
 
 
 def test_dashboard_port_check_detects_listener():

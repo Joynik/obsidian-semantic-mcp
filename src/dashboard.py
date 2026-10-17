@@ -265,7 +265,12 @@ def _get_vault_stats(stats: dict) -> None:
     # Key the cache on the vault set + the ignore-paths env so any config
     # change invalidates immediately (and unit tests that swap vaults between
     # cases don't see stale counts).
-    cache_key = (tuple(vaults), os.environ.get("OBSIDIAN_IGNORE_PATHS", "<unset>"))
+    cache_key = (
+        tuple(vaults),
+        os.environ.get("OBSIDIAN_IGNORE_PATHS", "<unset>"),
+        os.environ.get("OBSIDIAN_INDEX_ARCHIVE", "no"),
+        os.environ.get("OBSIDIAN_ARCHIVE_FOLDER", "archive"),
+    )
     now = time.monotonic()
     with _vault_count_cache_lock:
         if _vault_count_cache is not None:

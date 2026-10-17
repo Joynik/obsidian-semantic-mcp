@@ -1675,6 +1675,20 @@ def test_archive_index_setting_controls_file_selection(monkeypatch, tmp_path):
     assert not server._should_skip_path(archived)
 
 
+def test_custom_archive_folder_controls_file_selection(monkeypatch, tmp_path):
+    from src import server
+
+    monkeypatch.setattr(server, "_VAULT_LIST", [str(tmp_path)])
+    monkeypatch.delenv("OBSIDIAN_IGNORE_PATHS", raising=False)
+    monkeypatch.setenv("OBSIDIAN_ARCHIVE_FOLDER", "Archive")
+    monkeypatch.setenv("OBSIDIAN_INDEX_ARCHIVE", "no")
+    archived = tmp_path / "Archive" / "older.md"
+    assert server._should_skip_path(archived)
+    assert not server._should_skip_path(tmp_path / "archive" / "older.md")
+    monkeypatch.setenv("OBSIDIAN_INDEX_ARCHIVE", "yes")
+    assert not server._should_skip_path(archived)
+
+
 @pytest.mark.qdrant
 def test_qdrant_replaces_changed_note_chunks_without_stale_vectors():
     import uuid
