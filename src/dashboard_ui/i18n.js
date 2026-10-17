@@ -8,7 +8,6 @@ const TRANSLATIONS = {
   'Activity': ['Activity', 'Активность', 'Активність', 'Activité', 'Actividad', 'Aktivität', 'Atividade', '活动', 'アクティビティ'],
   'Workspace': ['Workspace', 'Рабочее пространство', 'Робочий простір', 'Espace de travail', 'Espacio de trabajo', 'Arbeitsbereich', 'Área de trabalho', '工作区', 'ワークスペース'],
   'Language': ['Language', 'Язык', 'Мова', 'Langue', 'Idioma', 'Sprache', 'Idioma', '语言', '言語'],
-  'Browser language': ['Browser language', 'Язык браузера', 'Мова браузера', 'Langue du navigateur', 'Idioma del navegador', 'Browsersprache', 'Idioma do navegador', '浏览器语言', 'ブラウザーの言語'],
   'Live updates': ['Live updates', 'Автообновление', 'Автооновлення', 'Actualisation auto', 'Actualización automática', 'Automatische Aktualisierung', 'Atualização automática', '自动更新', '自動更新'],
   'Light theme': ['Light theme', 'Светлая тема', 'Світла тема', 'Thème clair', 'Tema claro', 'Helles Design', 'Tema claro', '浅色主题', 'ライトテーマ'],
   'Dark theme': ['Dark theme', 'Тёмная тема', 'Темна тема', 'Thème sombre', 'Tema oscuro', 'Dunkles Design', 'Tema escuro', '深色主题', 'ダークテーマ'],
@@ -108,8 +107,9 @@ function captureStaticText() {
 }
 
 function browserLanguage() {
-  const preferences = [...(navigator.languages || []), navigator.language];
+  const preferences = [navigator.language, ...(navigator.languages || [])];
   for (const preference of preferences) {
+    if (typeof preference !== 'string') continue;
     const language = preference.toLowerCase().split('-')[0];
     if (LANGUAGES.includes(language)) return language;
   }
@@ -117,10 +117,9 @@ function browserLanguage() {
 }
 
 function applyLanguage(language) {
-  const choice = LANGUAGES.includes(language) ? language : 'auto';
-  currentLanguage = choice === 'auto' ? browserLanguage() : choice;
+  currentLanguage = LANGUAGES.includes(language) ? language : browserLanguage();
   document.documentElement.lang = currentLanguage === 'zh' ? 'zh-CN' : currentLanguage;
-  document.getElementById('language-select').value = choice;
+  document.getElementById('language-select').value = currentLanguage;
   staticText.forEach(([node, before, key, after]) => { node.textContent = before + t(key) + after; });
   document.title = 'OSM — ' + t('Dashboard');
   document.querySelector('.brand').setAttribute('aria-label', t('OSM dashboard overview'));
@@ -136,5 +135,5 @@ function savedLanguage() {
     const saved = localStorage.getItem(LANGUAGE_KEY);
     if (LANGUAGES.includes(saved)) return saved;
   } catch (e) { /* Storage may be unavailable. */ }
-  return 'auto';
+  return browserLanguage();
 }

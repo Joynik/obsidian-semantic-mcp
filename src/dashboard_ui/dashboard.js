@@ -26,8 +26,7 @@ document.getElementById('language-select').addEventListener('change', event => {
   applyLanguage(event.target.value);
   applyTheme(document.documentElement.dataset.theme);
   try {
-    if (event.target.value === 'auto') localStorage.removeItem(LANGUAGE_KEY);
-    else localStorage.setItem(LANGUAGE_KEY, event.target.value);
+    localStorage.setItem(LANGUAGE_KEY, event.target.value);
   } catch (e) { /* Selection still works. */ }
   const empty = document.querySelector('#search-results .empty-state');
   if (empty) empty.textContent = t('No results found.');
