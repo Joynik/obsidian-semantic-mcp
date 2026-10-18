@@ -11,15 +11,7 @@ permissions:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15
-            architecture: arm64
-          - runner: macos-15-intel
-            architecture: x86_64
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.0
@@ -28,11 +20,9 @@ jobs:
         run: uv sync --locked --python 3.14 --group build
 
       - name: Check release version and architecture
-        env:
-          EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
         run: |
           version="$(uv run --no-sync python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
-          test "$(uname -m)" = "$EXPECTED_ARCHITECTURE"
+          test "$(uname -m)" = arm64
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             test "$GITHUB_REF_NAME" = "v$version"
           fi
@@ -46,19 +36,18 @@ jobs:
 
       - name: Build and package onefile executable
         env:
-          EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
           COPYFILE_DISABLE: "1"
         run: |
           uv run --no-sync python binary-build/build.py --onefile
           binary-build/output/osm help > /dev/null
           version="$(uv run --no-sync python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
           mkdir -p binary-build/release
-          tar -czf "binary-build/release/osm-v${version}-macos-${EXPECTED_ARCHITECTURE}.tar.gz" \
+          tar -czf "binary-build/release/osm-v${version}-macos-arm64.tar.gz" \
             -C binary-build/output osm -C "$GITHUB_WORKSPACE" LICENSE
 
       - uses: actions/upload-artifact@v7
         with:
-          name: osm-macos-${{ matrix.architecture }}
+          name: osm-macos-arm64
           path: binary-build/release/*.tar.gz
           if-no-files-found: error
 
@@ -75,18 +64,15 @@ jobs:
           merge-multiple: true
           path: dist
 
-      - name: Verify both archives and publish release
+      - name: Verify archive and publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd dist
           test -f "osm-${GITHUB_REF_NAME}-macos-arm64.tar.gz"
-          test -f "osm-${GITHUB_REF_NAME}-macos-x86_64.tar.gz"
-          sha256sum "osm-${GITHUB_REF_NAME}-macos-arm64.tar.gz" \
-            "osm-${GITHUB_REF_NAME}-macos-x86_64.tar.gz" > SHA256SUMS
+          sha256sum "osm-${GITHUB_REF_NAME}-macos-arm64.tar.gz" > SHA256SUMS
           gh release create "$GITHUB_REF_NAME" \
             "osm-${GITHUB_REF_NAME}-macos-arm64.tar.gz" \
-            "osm-${GITHUB_REF_NAME}-macos-x86_64.tar.gz" \
             SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \

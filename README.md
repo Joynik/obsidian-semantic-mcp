@@ -4,7 +4,7 @@ OSM adds semantic, keyword, and hybrid search for Obsidian notes to local MCP cl
 
 ## Install and configure
 
-On macOS, install the prebuilt OSM executable from the Homebrew tap. The OSM formula does not install Python or build tools:
+On Apple Silicon with macOS 26 or newer, install the prebuilt OSM executable from the Homebrew tap. The OSM formula does not install Python or build tools:
 
 ```sh
 brew install joynik/tap/osm
@@ -54,7 +54,7 @@ uv run python binary-build/build.py           # standalone folder
 uv run python binary-build/build.py --onefile # single executable
 ```
 
-Build output goes to `binary-build/output/`. The binary still needs Ollama and the chosen database at runtime; it does not need a separately installed Python. GitHub release tags build macOS arm64 and Intel binaries for Homebrew. The regular `uv run osm` workflow remains available.
+Build output goes to `binary-build/output/`. The binary still needs Ollama and the chosen database at runtime; it does not need a separately installed Python. GitHub release tags build an arm64 binary on macOS 26 for Homebrew. The regular `uv run osm` workflow remains available.
 
 The wizard asks separately before connecting each MCP client and before granting that client write access. Both answers default to **No**. `osm init` can exclude an archive folder from indexing; its default name is `Archive`, and you can enter another folder name.
 
