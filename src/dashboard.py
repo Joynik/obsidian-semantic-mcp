@@ -15,6 +15,7 @@ import math
 import os
 import secrets
 import socket
+import socketserver
 import stat
 import subprocess
 import threading
@@ -673,6 +674,12 @@ class DashboardServer(http.server.ThreadingHTTPServer):
     """Serve independent dashboard clients without one slow request blocking all."""
 
     daemon_threads = True
+
+    def server_bind(self) -> None:
+        # HTTPServer normally performs reverse DNS here, which can stall startup.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = "localhost"
+        self.server_port = self.server_address[1]
 
 
 def serve_dashboard() -> None:
