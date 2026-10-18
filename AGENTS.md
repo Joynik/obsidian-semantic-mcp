@@ -23,3 +23,8 @@ An installed command must not depend on the source checkout for execution, confi
 
 - Run `uv run ruff check osm_cli.py src` and `uv run ruff format --check osm_cli.py src` after editing runtime Python files.
 - Run `uv run ty check osm_cli.py src` after changing Python types or interfaces.
+
+## Tests
+
+- Run tests only before publishing changes to GitHub or when the owner explicitly requests them.
+- When tests fail, inspect logs for the failed tests only; do not read logs from successful tests.
