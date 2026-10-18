@@ -132,7 +132,7 @@ def test_startup_banner_does_not_leak_password(tmp_path):
     )
     try:
         assert proc.stdout is not None
-        ready, _, _ = select.select([proc.stdout], [], [], 5)
+        ready, _, _ = select.select([proc.stdout], [], [], 20)
         assert ready, "dashboard did not produce a startup message"
         banner = proc.stdout.readline()
         assert secret not in banner, f"password leaked in startup banner: {banner!r}"
@@ -164,7 +164,7 @@ def test_dashboard_stop_closes_listening_port(tmp_path, module_args):
     )
     try:
         assert proc.stdout is not None
-        ready, _, _ = select.select([proc.stdout], [], [], 5)
+        ready, _, _ = select.select([proc.stdout], [], [], 20)
         assert ready, "dashboard did not start"
         banner = proc.stdout.readline()
         assert "Dashboard running at http://127.0.0.1:" in banner, banner

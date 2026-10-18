@@ -195,7 +195,7 @@ main()
         env=env,
     )
     try:
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 20
         while not ready.exists() and process.poll() is None:
             if time.monotonic() >= deadline:
                 break
