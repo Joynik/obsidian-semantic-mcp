@@ -3,6 +3,7 @@
 import json
 import os
 import select
+import signal
 import subprocess
 import sys
 import threading
@@ -186,6 +187,7 @@ main()
         OSM_DATABASE_BACKEND="qdrant",
         QDRANT_URL="http://127.0.0.1:6333",
         OSM_STOP_READY=str(ready),
+        PYTHONFAULTHANDLER="1",
     )
     process = subprocess.Popen(
         [sys.executable, "-c", source],
@@ -200,7 +202,9 @@ main()
             if time.monotonic() >= deadline:
                 break
             time.sleep(0.05)
-        assert ready.exists()
+        if not ready.exists() and process.poll() is None:
+            process.send_signal(signal.SIGABRT)
+        assert ready.exists(), process.communicate(timeout=5)[1].decode()[-6000:]
         assert launcher.stop_runs()[0] == 1
         _, stderr = process.communicate(timeout=5)
         assert process.returncode == 0, stderr.decode()

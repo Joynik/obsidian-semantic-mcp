@@ -17,6 +17,7 @@ import importlib
 import os
 import select
 import re
+import signal
 import shutil
 import subprocess
 import sys
@@ -49,6 +50,13 @@ def _reload_dashboard():
     """Reload dashboard.py so its module-level constants re-read the
     current env (DASHBOARD_BIND, DASHBOARD_TOKEN, DATABASE_URL, ...)."""
     return importlib.reload(dashboard)
+
+
+def _startup_error(proc: subprocess.Popen[str]) -> str:
+    if proc.poll() is None:
+        proc.send_signal(signal.SIGABRT)
+    output, _ = proc.communicate(timeout=5)
+    return f"process exit={proc.returncode}; output={output[-6000:]}"
 
 
 @pytest.fixture(autouse=True)
@@ -122,6 +130,7 @@ def test_startup_banner_does_not_leak_password(tmp_path):
         "DASHBOARD_PORT": "0",  # OS picks a free ephemeral port — never binds a fixed one
         "DASHBOARD_TOKEN": "test-fixture-token-not-a-secret",
         "PYTHONUNBUFFERED": "1",
+        "PYTHONFAULTHANDLER": "1",
     }
     proc = subprocess.Popen(
         [sys.executable, "-u", "-m", "src.dashboard"],
@@ -133,7 +142,7 @@ def test_startup_banner_does_not_leak_password(tmp_path):
     try:
         assert proc.stdout is not None
         ready, _, _ = select.select([proc.stdout], [], [], 20)
-        assert ready, "dashboard did not produce a startup message"
+        assert ready, _startup_error(proc) if not ready else ""
         banner = proc.stdout.readline()
         assert secret not in banner, f"password leaked in startup banner: {banner!r}"
         assert "127.0.0.1" in banner, f"expected loopback bind in banner: {banner!r}"
@@ -154,6 +163,7 @@ def test_dashboard_stop_closes_listening_port(tmp_path, module_args):
         "DASHBOARD_PORT": "0",
         "DASHBOARD_TOKEN": "test-fixture-token-not-a-secret",
         "PYTHONUNBUFFERED": "1",
+        "PYTHONFAULTHANDLER": "1",
     }
     proc = subprocess.Popen(
         [sys.executable, "-u", "-m", *module_args],
@@ -165,7 +175,7 @@ def test_dashboard_stop_closes_listening_port(tmp_path, module_args):
     try:
         assert proc.stdout is not None
         ready, _, _ = select.select([proc.stdout], [], [], 20)
-        assert ready, "dashboard did not start"
+        assert ready, _startup_error(proc) if not ready else ""
         banner = proc.stdout.readline()
         assert "Dashboard running at http://127.0.0.1:" in banner, banner
         port = int(banner.rsplit(":", 1)[1])
