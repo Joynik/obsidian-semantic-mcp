@@ -24,12 +24,10 @@ import subprocess
 import sys
 import tempfile
 import time
-import tomllib
 import urllib.parse
 import urllib.request
 import webbrowser
 from collections import deque
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import questionary
@@ -40,7 +38,7 @@ from rich.console import Console
 from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
-from src.config import DEFAULT_EMBED_MODEL
+from src.config import DEFAULT_EMBED_MODEL, app_version
 from src.embedding_profiles import embedding_input
 from src.launcher import OSM_CONFIG_DIR, OSM_LOG_PATH
 from src.workers import child_command, run_worker
@@ -53,24 +51,7 @@ if sys.stderr.encoding and sys.stderr.encoding.lower().replace("-", "") != "utf8
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 
-def _version_from_pyproject() -> str | None:
-    pyproject = Path(__file__).resolve().parent / "pyproject.toml"
-    try:
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-        project = data.get("project", {})
-        v = project.get("version")
-        return str(v) if v else None
-    except Exception:
-        return None
-
-
-if source_version := _version_from_pyproject():
-    APP_VERSION = source_version
-else:
-    try:
-        APP_VERSION = version("obsidian-semantic-mcp")
-    except PackageNotFoundError:
-        APP_VERSION = "0.0.0"
+APP_VERSION = app_version()
 
 
 # ── Terminal output ───────────────────────────────────────────────────────────
@@ -1417,6 +1398,20 @@ def _report_dashboard_status() -> None:
         port = dashboard.removeprefix("PONG ")
         if port.isdecimal() and _dashboard_port_open(port):
             ok(f"Dashboard running: http://127.0.0.1:{port}")
+            try:
+                response = requests.get(f"http://127.0.0.1:{port}/api/health", timeout=1)
+                health = response.json() if response.ok else None
+                dashboard_version = health.get("version") if isinstance(health, dict) else None
+            except requests.RequestException, ValueError:
+                dashboard_version = None
+            if dashboard_version != APP_VERSION:
+                if isinstance(dashboard_version, str):
+                    warn(
+                        f"Dashboard v{dashboard_version} differs from OSM v{APP_VERSION}; "
+                        "restart it with osm dashboard"
+                    )
+                else:
+                    warn("Dashboard version unavailable; restart it with osm dashboard")
         else:
             fail("Dashboard control socket is active, but its HTTP port is unavailable")
     else:

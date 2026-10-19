@@ -446,7 +446,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/da/0f/db5cfdebf906a6de1
 
 [[package]]
 name = "obsidian-semantic-mcp"
-version = "0.48.0"
+version = "0.48.1"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

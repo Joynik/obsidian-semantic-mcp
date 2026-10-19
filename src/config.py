@@ -8,10 +8,27 @@ and cannot silently diverge.
 import os
 import re
 import secrets
+import tomllib
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 DEFAULT_EMBED_MODEL = "qwen3-embedding:0.6b"
 SEARCH_LANGUAGES = ("russian", "english", "simple")
+
+
+def app_version() -> str:
+    """Read the version declared by pyproject.toml or its installed metadata."""
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    try:
+        project = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]
+        if project.get("name") == "obsidian-semantic-mcp":
+            return str(project["version"])
+    except OSError, KeyError, UnicodeError, tomllib.TOMLDecodeError:
+        pass
+    try:
+        return version("obsidian-semantic-mcp")
+    except PackageNotFoundError:
+        return "0.0.0"
 
 
 def search_language() -> str:

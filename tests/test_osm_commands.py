@@ -3,12 +3,14 @@
 import json
 import socket
 import sys
+import tomllib
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 import osm_cli
-from src import workers
+from src import config, workers
 
 
 @pytest.fixture(autouse=True)
@@ -24,6 +26,13 @@ def test_only_native_commands_are_exposed():
     assert "version" in osm_cli.COMMANDS
     assert "rebuild" not in osm_cli.COMMANDS
     assert "tunnel" not in osm_cli.COMMANDS
+
+
+def test_source_version_takes_precedence_over_stale_installed_metadata(monkeypatch):
+    monkeypatch.setattr(config, "version", lambda _: "0.44.5")
+    project_file = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    expected = tomllib.loads(project_file.read_text(encoding="utf-8"))["project"]["version"]
+    assert config.app_version() == expected
 
 
 def test_worker_command_uses_python_module_in_checkout(monkeypatch):

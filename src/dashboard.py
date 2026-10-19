@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 import psycopg2
 import requests
 
-from .config import DEFAULT_EMBED_MODEL, build_dsn, resolve_dashboard_token
+from .config import DEFAULT_EMBED_MODEL, app_version, build_dsn, resolve_dashboard_token
 from .launcher import _run_directory
 from .qdrant import QdrantStore, local_url
 from .server import (
@@ -63,24 +63,7 @@ DATABASE_URL = build_dsn()
 DATABASE_BACKEND = os.environ.get("OSM_DATABASE_BACKEND", "postgresql")
 
 
-def _read_version() -> str:
-    from importlib.metadata import PackageNotFoundError, version
-
-    try:
-        return version("obsidian-semantic-mcp")
-    except PackageNotFoundError:
-        pass
-    try:
-        toml = (Path(__file__).parent.parent / "pyproject.toml").read_text()
-        for line in toml.splitlines():
-            if line.startswith("version"):
-                return line.split("=", 1)[1].strip().strip('"')
-    except Exception:
-        pass
-    return "dev"
-
-
-APP_VERSION = _read_version()
+APP_VERSION = app_version()
 
 # Bearer token guarding the mutating endpoints (/api/reindex, /api/reindex/full,
 # /api/prune, /api/ollama/start). Resolved once at import time — see
@@ -546,7 +529,9 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         elif parsed.path == "/i18n.js":
             self._asset_response(DASHBOARD_I18N, "text/javascript; charset=utf-8")
         elif parsed.path == "/api/health":
-            self._json_response(200, {"ok": True, "instance": DASHBOARD_INSTANCE})
+            self._json_response(
+                200, {"ok": True, "instance": DASHBOARD_INSTANCE, "version": APP_VERSION}
+            )
         elif parsed.path == "/api/search":
             qs = parse_qs(parsed.query)
             query = qs.get("q", [""])[0].strip()

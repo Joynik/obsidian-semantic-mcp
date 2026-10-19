@@ -187,6 +187,7 @@ def test_dashboard_stop_closes_listening_port(tmp_path, module_args):
             assert "{{TOKEN}}" not in response.text
         health = requests.get(f"http://127.0.0.1:{port}/api/health", timeout=2)
         assert health.json()["ok"] is True
+        assert health.json()["version"] == dashboard.APP_VERSION
         assert len(health.json()["instance"]) == 16
         assert health.headers["Cache-Control"] == "no-store"
 
