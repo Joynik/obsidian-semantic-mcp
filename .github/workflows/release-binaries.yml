@@ -64,16 +64,14 @@ jobs:
           merge-multiple: true
           path: dist
 
-      - name: Verify archive and publish release
+      - name: Publish release archive
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd dist
           test -f "osm-${GITHUB_REF_NAME}-macos-arm64.tar.gz"
-          sha256sum "osm-${GITHUB_REF_NAME}-macos-arm64.tar.gz" > SHA256SUMS
           gh release create "$GITHUB_REF_NAME" \
             "osm-${GITHUB_REF_NAME}-macos-arm64.tar.gz" \
-            SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --title "OSM $GITHUB_REF_NAME" \
