@@ -50,11 +50,10 @@ To build a standalone executable from the same source, install the optional buil
 
 ```sh
 uv sync --python 3.14 --group build
-uv run python binary-build/build.py           # standalone folder
-uv run python binary-build/build.py --onefile # single executable
+uv run python binary-build/build.py
 ```
 
-Build output goes to `binary-build/output/`. The binary still needs Ollama and the chosen database at runtime; it does not need a separately installed Python. GitHub release tags build an arm64 binary on macOS 26 for Homebrew. The regular `uv run osm` workflow remains available.
+Build output goes to `binary-build/output/osm.dist/`. Keep this directory together when moving the executable. It still needs Ollama and the chosen database at runtime, but not a separately installed Python. GitHub release tags build an arm64 standalone archive on macOS 26 for Homebrew. The regular `uv run osm` workflow remains available.
 
 The wizard asks separately before connecting each MCP client and before granting that client write access. Both answers default to **No**. `osm init` can exclude an archive folder from indexing; its default name is `Archive`, and you can enter another folder name.
 

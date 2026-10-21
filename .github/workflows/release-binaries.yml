@@ -34,16 +34,16 @@ jobs:
           uv run --no-sync ty check osm_cli.py src
           uv run --no-sync pytest -q
 
-      - name: Build and package onefile executable
+      - name: Build and package standalone executable
         env:
           COPYFILE_DISABLE: "1"
         run: |
-          uv run --no-sync python binary-build/build.py --onefile
-          binary-build/output/osm help > /dev/null
+          uv run --no-sync python binary-build/build.py
+          binary-build/output/osm.dist/osm help > /dev/null
           version="$(uv run --no-sync python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
           mkdir -p binary-build/release
           tar -czf "binary-build/release/osm-v${version}-macos-arm64.tar.gz" \
-            -C binary-build/output osm -C "$GITHUB_WORKSPACE" LICENSE
+            -C binary-build/output osm.dist -C "$GITHUB_WORKSPACE" LICENSE
 
       - uses: actions/upload-artifact@v7
         with:

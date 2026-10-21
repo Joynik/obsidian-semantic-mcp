@@ -13,15 +13,13 @@ OUTPUT = Path(__file__).resolve().parent / "output"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--onefile", action="store_true", help="build a single executable")
-    args = parser.parse_args()
+    argparse.ArgumentParser().parse_args()
     OUTPUT.mkdir(parents=True, exist_ok=True)
     command = [
         sys.executable,
         "-m",
         "nuitka",
-        "--mode=onefile" if args.onefile else "--mode=standalone",
+        "--mode=standalone",
         "--disable-cache=ccache",
         "--update-check=never",
         f"--output-dir={OUTPUT}",
