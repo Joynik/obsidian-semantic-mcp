@@ -55,6 +55,13 @@ uv run python binary-build/build.py
 
 Build output goes to `binary-build/output/osm.dist/`. Keep this directory together when moving the executable. It still needs Ollama and the chosen database at runtime, but not a separately installed Python. GitHub release tags build an arm64 standalone archive on macOS 26 for Homebrew. The regular `uv run osm` workflow remains available.
 
+After publishing a release, the workflow starts `update-osm.yml` in
+`Joynik/homebrew-tap`. Configure the `HOMEBREW_TAP_TOKEN` Actions secret in
+this repository with a fine-grained token limited to that tap and the
+**Actions: write** permission. A notification failure is reported separately
+from publication; the tap also checks for releases every six hours as a fallback.
+Check the tap's Actions run for update completion.
+
 The wizard asks separately before connecting each MCP client and before granting that client write access. Both answers default to **No**. `osm init` can exclude an archive folder from indexing; its default name is `Archive`, and you can enter another folder name.
 
 ## Run and check

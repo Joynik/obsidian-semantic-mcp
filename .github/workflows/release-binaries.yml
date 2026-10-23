@@ -76,3 +76,20 @@ jobs:
             --verify-tag \
             --title "OSM $GITHUB_REF_NAME" \
             --notes "macOS binaries for Homebrew."
+
+  notify-tap:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Start Homebrew update
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::HOMEBREW_TAP_TOKEN is required with Actions write access to Joynik/homebrew-tap"
+            exit 1
+          fi
+          gh workflow run update-osm.yml --repo Joynik/homebrew-tap --ref main
